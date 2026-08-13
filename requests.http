@@ -23,3 +23,96 @@ Content-Type: application/json
 
 ### Desactivar ese mismo servicio
 PATCH http://localhost:3000/services/11199dc9-e57d-41a1-bf15-4b306c651b07/toggle-active
+
+### ======================================= AVAILABILITY =======================================
+
+### Crear horario: Lunes a Viernes, 9 a 18
+POST http://localhost:3000/availability
+Content-Type: application/json
+
+{
+  "day_of_week": 5,
+  "start_time": "09:00",
+  "end_time": "18:00"
+}
+
+### Listar horarios
+GET http://localhost:3000/availability
+
+### Crear una excepción (feriado)
+POST http://localhost:3000/availability/exceptions
+Content-Type: application/json
+
+{
+  "date": "2026-08-25",
+  "closed_all_day": true,
+  "reason": "Feriado nacional"
+}
+
+### Listar excepciones
+GET http://localhost:3000/availability/exceptions
+
+### ======================================= CUSTOMERS =======================================
+
+### Crear cliente
+POST http://localhost:3000/customers
+Content-Type: application/json
+
+{
+  "name": "Jorge Fuentes",
+  "phone": "+59891234566",
+  "notes": "Prefiere turnos por la tarde"
+}
+
+### Listar clientes
+GET http://localhost:3000/customers
+
+### Buscar por nombre
+GET http://localhost:3000/customers?search=carlos
+
+### Ver detalle (reemplazá el id por el que te devolvió el POST)
+GET http://localhost:3000/customers/99f3a315-bd72-4d73-8bd2-9b6a8d5b93d3
+
+### Intentar crear el mismo teléfono de nuevo (debería dar 409)
+POST http://localhost:3000/customers
+Content-Type: application/json
+
+{
+  "name": "Otro nombre",
+  "phone": "+59891234567"
+}
+
+### ======================================= APPOINTMENTS =======================================
+
+### Ver horarios disponibles para el "Corte clásico" en una fecha
+GET http://localhost:3000/appointments/available-slots?date=2026-08-20&service_id=d70e0e60-22b6-424c-a744-b5b8543f19e8
+
+### Crear una reserva manual (usá un horario que haya aparecido en la lista anterior)
+POST http://localhost:3000/appointments
+Content-Type: application/json
+
+{
+  "customer_id": "99f3a315-bd72-4d73-8bd2-9b6a8d5b93d3",
+  "service_id": "d70e0e60-22b6-424c-a744-b5b8543f19e8",
+  "date": "2026-08-20",
+  "start_time": "10:00",
+  "created_via": "manual"
+}
+
+### Volver a pedir los horarios disponibles: el que acabás de ocupar ya NO debería aparecer
+GET http://localhost:3000/appointments/available-slots?date=2026-08-20&service_id=d70e0e60-22b6-424c-a744-b5b8543f19e8
+
+### Intentar crear OTRA reserva en el mismo horario exacto (debe dar 409)
+POST http://localhost:3000/appointments
+Content-Type: application/json
+
+{
+  "customer_id": "9440879f-e889-4c64-8220-cb1c851c1946",
+  "service_id": "d70e0e60-22b6-424c-a744-b5b8543f19e8",
+  "date": "2026-08-20",
+  "start_time": "11:00",
+  "created_via": "manual"
+}
+
+### Ver la agenda del día
+GET http://localhost:3000/appointments?date=2026-08-20
