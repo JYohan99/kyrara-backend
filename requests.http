@@ -1,0 +1,25 @@
+### Listar servicios
+GET http://localhost:3000/services
+
+### Crear un servicio nuevo
+POST http://localhost:3000/services
+Content-Type: application/json
+
+{
+  "name": "Barba",
+  "duration_minutes": 20,
+  "price": 300
+}
+
+### Editar el servicio "Barba" (reemplazá el id por el que te devolvió tu POST)
+PUT http://localhost:3000/services/11199dc9-e57d-41a1-bf15-4b306c651b07
+Content-Type: application/json
+
+{
+  "name": "Barba prolija",
+  "duration_minutes": 25,
+  "price": 350
+}
+
+### Desactivar ese mismo servicio
+PATCH http://localhost:3000/services/11199dc9-e57d-41a1-bf15-4b306c651b07/toggle-active

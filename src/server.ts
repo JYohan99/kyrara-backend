@@ -1,9 +1,14 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import { appointmentRoutes } from "./appointments/routes.js";
+import { serviceRoutes } from "./services/routes.js";
 
 const app = Fastify({ logger: true });
 
 app.get("/health", async () => ({ status: "ok", service: "kyrara-backend" }));
+app.register(serviceRoutes, { prefix: "/services" });
+
+app.register(appointmentRoutes, { prefix: "/appointments" });
 
 const port = Number(process.env.PORT ?? 3000);
 
