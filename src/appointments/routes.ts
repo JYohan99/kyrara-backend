@@ -208,4 +208,17 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
     return { id, status: newStatus };
   });
+
+    // Devuelve el negocio piloto junto con sus servicios (usado por la
+  // pantalla de Inicio de la app)
+  app.get("/business", async () => {
+    const business = db.prepare("SELECT * FROM business LIMIT 1").get();
+    if (!business) return { error: "No hay negocio cargado todavía" };
+
+    const services = db
+      .prepare("SELECT * FROM service WHERE business_id = ?")
+      .all((business as any).id);
+
+    return { business, services };
+  });
 }
