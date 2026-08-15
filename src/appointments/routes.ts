@@ -52,6 +52,11 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const businessId = getBusinessId();
     if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
 
+    const businessRow = db.prepare("SELECT slot_step_minutes FROM business WHERE id = ?").get(businessId) as
+      | { slot_step_minutes: number }
+      | undefined;
+    const STEP = businessRow?.slot_step_minutes ?? 30;
+
     const service = db.prepare("SELECT * FROM service WHERE id = ? AND active = 1").get(service_id) as
       | { duration_minutes: number }
       | undefined;
@@ -91,7 +96,6 @@ export async function appointmentRoutes(app: FastifyInstance) {
     ];
 
     const duration = service.duration_minutes;
-    const STEP = 15; // generamos candidatos cada 15 minutos
     const slots: string[] = [];
 
     for (const w of windows) {
@@ -207,6 +211,24 @@ export async function appointmentRoutes(app: FastifyInstance) {
     db.prepare("UPDATE appointment SET status = ? WHERE id = ?").run(newStatus, id);
 
     return { id, status: newStatus };
+  });
+
+  // Permite ajustar la configuración del negocio (ej. el intervalo de
+  // horarios que ofrece el motor de disponibilidad) desde la app.
+  app.patch("/business/settings", async (request, reply) => {
+    const { slot_step_minutes } = request.body as { slot_step_minutes?: number };
+    const businessId = getBusinessId();
+    if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
+
+    if (slot_step_minutes && ![15, 30, 45, 60].includes(slot_step_minutes)) {
+      return reply.status(400).send({ error: "slot_step_minutes debe ser 15, 30, 45 o 60" });
+    }
+
+    if (slot_step_minutes) {
+      db.prepare("UPDATE business SET slot_step_minutes = ? WHERE id = ?").run(slot_step_minutes, businessId);
+    }
+
+    return db.prepare("SELECT * FROM business WHERE id = ?").get(businessId);
   });
 
     // Devuelve el negocio piloto junto con sus servicios (usado por la

@@ -116,3 +116,19 @@ Content-Type: application/json
 
 ### Ver la agenda del día
 GET http://localhost:3000/appointments?date=2026-08-20
+
+### Cambiar el intervalo a 15 minutos 
+PATCH http://localhost:3000/appointments/business/settings 
+Content-Type: application/json
+
+{ 
+  "slot_step_minutes": 15
+}
+
+### Volver a 30 
+PATCH http://localhost:3000/appointments/business/settings
+Content-Type: application/json
+
+{
+  "slot_step_minutes": 30
+}

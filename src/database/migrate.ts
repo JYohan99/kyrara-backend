@@ -88,3 +88,10 @@ CREATE INDEX IF NOT EXISTS idx_appointment_slot ON appointment(business_id, date
 `);
 
 console.log(`Migración completa. Base de datos en: ${process.env.DATABASE_PATH ?? "./data/kyrara.db"}`);
+// Migración incremental: agrega slot_step_minutes si todavía no existe
+// (para no romper la base de datos que ya tenías creada)
+const businessColumns = db.prepare("PRAGMA table_info(business)").all() as { name: string }[];
+if (!businessColumns.some((c) => c.name === "slot_step_minutes")) {
+  db.exec("ALTER TABLE business ADD COLUMN slot_step_minutes INTEGER NOT NULL DEFAULT 30");
+  console.log("Columna slot_step_minutes agregada (default 30 minutos).");
+}
