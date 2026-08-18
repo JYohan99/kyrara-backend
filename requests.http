@@ -12,7 +12,7 @@ Content-Type: application/json
 }
 
 ### Editar el servicio "Barba" (reemplazá el id por el que te devolvió tu POST)
-PUT http://localhost:3000/services/11199dc9-e57d-41a1-bf15-4b306c651b07
+PUT http://localhost:3000/services/f79c996a-f43d-46c7-9c3e-152c9871bc69
 Content-Type: application/json
 
 {
@@ -22,7 +22,7 @@ Content-Type: application/json
 }
 
 ### Desactivar ese mismo servicio
-PATCH http://localhost:3000/services/11199dc9-e57d-41a1-bf15-4b306c651b07/toggle-active
+PATCH http://localhost:3000/services/f79c996a-f43d-46c7-9c3e-152c9871bc69/toggle-active
 
 ### ======================================= AVAILABILITY =======================================
 

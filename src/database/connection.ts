@@ -1,14 +1,7 @@
-import Database from "better-sqlite3";
-import path from "node:path";
-import fs from "node:fs";
+import { Pool } from "pg";
+import "dotenv/config";
 
-const dbPath = process.env.DATABASE_PATH ?? "./data/kyrara.db";
-const dbDir = path.dirname(dbPath);
-
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
-export const db = new Database(dbPath);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Supabase requiere SSL
+});
