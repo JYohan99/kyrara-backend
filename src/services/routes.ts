@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
 
+
 export async function serviceRoutes(app: FastifyInstance) {
   async function getBusinessId(): Promise<string | null> {
     const { rows } = await pool.query("SELECT id FROM business LIMIT 1");

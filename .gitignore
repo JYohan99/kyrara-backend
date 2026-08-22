@@ -1,1 +1,9 @@
-node_modules/ dist/ .env data/*.db data/*.db-journal data/*.db-wal data/*.db-shm *.log
+node_modules/
+dist/
+.env
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+*.log
+auth_info_baileys/

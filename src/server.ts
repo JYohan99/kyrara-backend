@@ -4,6 +4,7 @@ import { appointmentRoutes } from "./appointments/routes.js";
 import { serviceRoutes } from "./services/routes.js";
 import { availabilityRoutes } from "./availability/routes.js";
 import { customerRoutes } from "./customers/routes.js";
+import { startWhatsApp } from "./whatsapp/connection.js";
 
 const app = Fastify({ logger: true });
 
@@ -15,6 +16,7 @@ app.register(customerRoutes, { prefix: "/customers" });
 
 const port = Number(process.env.PORT ?? 3000);
 
+startWhatsApp();
 app.listen({ port, host: "0.0.0.0" }).then(() => {
   app.log.info(`Kyrara backend escuchando en el puerto ${port}`);
 });
