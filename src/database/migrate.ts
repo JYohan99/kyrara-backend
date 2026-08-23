@@ -85,6 +85,8 @@ async function migrate() {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
 
+        ALTER TABLE conversation ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}';
+
     CREATE INDEX IF NOT EXISTS idx_appointment_slot ON appointment(business_id, date, start_time, end_time);
   `);
 

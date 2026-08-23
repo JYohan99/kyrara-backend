@@ -2,6 +2,7 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
+import { handleIncomingMessage } from "./engine.js";
 
 const logger = pino({ level: "silent" }); // silenciamos los logs internos de Baileys, muy verborrágicos
 
@@ -37,17 +38,19 @@ export async function startWhatsApp() {
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return; // ignoramos mensajes propios y notificaciones vacías
+    if (!msg.message || msg.key.fromMe) return;
 
     const from = msg.key.remoteJid!;
-    const text =
-      msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
 
     console.log(`📩 Mensaje de ${from}: "${text}"`);
 
-    // Por ahora, solo respondemos con un eco para confirmar que la conexión funciona.
-    // En el próximo paso acá va a ir la lógica real del flujo de reservas.
-    await sock.sendMessage(from, { text: `Recibí tu mensaje: "${text}"` });
+    try {
+      await handleIncomingMessage(sock, from, text);
+    } catch (err) {
+      console.error("Error procesando mensaje de WhatsApp:", err);
+      await sock.sendMessage(from, { text: "Uy, tuvimos un problema. Probá de nuevo en un rato." });
+    }
   });
 
   return sock;
