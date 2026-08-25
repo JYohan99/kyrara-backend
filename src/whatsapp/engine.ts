@@ -184,6 +184,12 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
   }
 
   if (state === "START") {
+    if (!customer.name) {
+      await updateConversation(conversation.id, "ASK_NAME", {});
+      await reply("Hola 👋 Soy el asistente de ${business.name}. ¿Podrias proporcionar un nombre para identificarte en la agenda?");
+      return;
+    }
+
     const servicesRes = await pool.query(
       "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
       [business.id]
@@ -198,7 +204,30 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const list = services.map((s: any, i: number) => `${i + 1}. ${s.name} - ${s.duration_minutes} min`).join("\n");
 
     await updateConversation(conversation.id, "SELECT_SERVICE", { serviceIds: services.map((s: any) => s.id) });
-    await reply(`Hola 👋 ¿Qué servicio querés reservar?\n\n${list}\n\nEscribí el número de la opción.`);
+    await reply(`¡Hola ${customer.name}! ¿Qué servicio querés reservar?\n\n${list}\n\nEscribí el número de la opción.`);
+    return;
+  }
+
+  if (state === "ASK_NAME") {
+    const name = text.trim();
+    if (!name) {
+      await reply("No entendí. ¿Cómo te llamás?");
+      return;
+    }
+
+    await pool.query("UPDATE customer SET name = $1 WHERE id = $2", [name, customer.id]);
+    customer.name = name;
+
+    const servicesRes = await pool.query(
+      "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
+      [business.id]
+    );
+    const services = servicesRes.rows;
+
+    const list = services.map((s: any, i: number) => `${i + 1}. ${s.name} - ${s.duration_minutes} min`).join("\n");
+
+    await updateConversation(conversation.id, "SELECT_SERVICE", { serviceIds: services.map((s: any) => s.id) });
+    await reply(`¡Gracias, ${name}! ¿Qué servicio quieres reservar?\n\n${list}\n\nEscribí el número de la opción.`);
     return;
   }
 
