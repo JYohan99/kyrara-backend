@@ -24,6 +24,19 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+async function sendBarberPushNotification(expoPushToken: string | null, title: string, body: string) {
+  if (!expoPushToken) return;
+  try {
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ to: expoPushToken, title, body, sound: "default" }),
+    });
+  } catch (err) {
+    console.error("Error enviando push al barbero:", err);
+  }
+}
+
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -315,21 +328,32 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           ]
         );
 
-        await client.query("COMMIT");
+               await client.query("COMMIT");
         await updateConversation(conversation.id, "START", {});
+
+        const [y, m, d] = data.date.split("-");
+        const fechaLegible = formatFullDate(data.date);
 
         if (isApproval) {
           await reply("¡Gracias! Tu reserva está pendiente de confirmación del barbero. Te avisamos apenas la acepte.");
-          // Notificación interina al barbero por el mismo WhatsApp, hasta que
-          // exista un sistema de push real (Fase 9).
-          if (business.phone) {
-            const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
-            await sock.sendMessage(barberJid, {
-              text: `📅 Nueva reserva pendiente\nCliente: ${phone}\nServicio: ${serviceName}\nFecha: ${data.date}\nHora: ${data.start_time}\n\nAceptala o gestionala desde la app.`,
-            });
-          }
         } else {
-          await reply("¡Listo! Tu reserva quedó confirmada. Te esperamos 🙌");
+          await reply(`¡Listo! Tu reserva quedó confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos 🙌`);
+        }
+
+        // Notificación al barbero: push si tiene token guardado, y siempre
+        // también por WhatsApp como respaldo (por si no tiene la app abierta
+        // o instalada todavía).
+        await sendBarberPushNotification(
+          business.expo_push_token,
+          "📅 Nueva cita",
+          `${customer.name || phone} — ${serviceName} — ${fechaLegible} ${data.start_time}`
+        );
+
+        if (business.phone) {
+          const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+          await sock.sendMessage(barberJid, {
+            text: `📅 Nueva cita\nCliente: ${phone}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
+          });
         }
       } catch (err) {
         await client.query("ROLLBACK");

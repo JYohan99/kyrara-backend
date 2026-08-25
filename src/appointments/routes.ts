@@ -235,8 +235,11 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return updatedRes.rows[0];
   });
 
-  app.patch("/business/settings", async (request, reply) => {
-    const { slot_step_minutes } = request.body as { slot_step_minutes?: number };
+   app.patch("/business/settings", async (request, reply) => {
+    const { slot_step_minutes, booking_mode } = request.body as {
+      slot_step_minutes?: number;
+      booking_mode?: "auto" | "approval";
+    };
     const businessId = await getBusinessId();
     if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
 
@@ -246,6 +249,10 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
     if (slot_step_minutes) {
       await pool.query("UPDATE business SET slot_step_minutes = $1 WHERE id = $2", [slot_step_minutes, businessId]);
+    }
+
+    if (booking_mode && ["auto", "approval"].includes(booking_mode)) {
+      await pool.query("UPDATE business SET booking_mode = $1 WHERE id = $2", [booking_mode, businessId]);
     }
 
     const updatedRes = await pool.query("SELECT * FROM business WHERE id = $1", [businessId]);
