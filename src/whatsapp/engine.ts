@@ -2,55 +2,15 @@ import type { WASocket } from "baileys";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
 
-function normalizePhone(jid: string): string {
-  const digits = jid.split("@")[0].replace(/[^0-9]/g, "");
-  return `+${digits}`;
-}
-
-const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-
-const MESES = [
-  "enero", "febrero", "marzo", "abril", "mayo", "junio",
-  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-];
-
-function formatFullDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-  return `${weekday} ${d} de ${MESES[m - 1]}`;
-}
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function sendBarberPushNotification(expoPushToken: string | null, title: string, body: string) {
-  if (!expoPushToken) return;
-  try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ to: expoPushToken, title, body, sound: "default" }),
-    });
-  } catch (err) {
-    console.error("Error enviando push al barbero:", err);
-  }
-}
-
-function addDays(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function formatDateOption(dateStr: string, index: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-  const label = `${weekday} ${d.toString().padStart(2, "0")}/${m.toString().padStart(2, "0")}`;
-  if (index === 0) return `Hoy (${label})`;
-  if (index === 1) return `Mañana (${label})`;
-  return label;
+function extractLid(jid: string): string {
+  // Este es el identificador que entrega WhatsApp para esta conversación.
+  // Desde hace un tiempo, WhatsApp ya no expone siempre el número de
+  // teléfono real por privacidad (usa un código anónimo, "LID") — así que
+  // usamos esto como identificador ÚNICO INTERNO, nunca como el teléfono
+  // real del cliente. El teléfono queda como un campo de datos aparte,
+  // que el barbero puede completar a mano sin que rompa el reconocimiento
+  // de la conversación.
+  return jid.split("@")[0];
 }
 
 function timeToMinutes(t: string): number {
@@ -67,23 +27,52 @@ function dayOfWeek(dateStr: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
+const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+const MESES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function formatDateOption(dateStr: string, index: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  const label = `${weekday} ${d.toString().padStart(2, "0")}/${m.toString().padStart(2, "0")}`;
+  if (index === 0) return `Hoy (${label})`;
+  if (index === 1) return `Mañana (${label})`;
+  return label;
+}
+function formatFullDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${weekday} ${d} de ${MESES[m - 1]}`;
+}
+
 async function getBusiness() {
   const { rows } = await pool.query("SELECT * FROM business LIMIT 1");
   return rows[0];
 }
 
-async function getOrCreateCustomer(businessId: string, phone: string) {
+async function getOrCreateCustomer(businessId: string, lid: string) {
   const existing = await pool.query(
-    "SELECT * FROM customer WHERE business_id = $1 AND phone = $2",
-    [businessId, phone]
+    "SELECT * FROM customer WHERE business_id = $1 AND whatsapp_lid = $2",
+    [businessId, lid]
   );
   if (existing.rows[0]) return existing.rows[0];
 
   const id = randomUUID();
-  await pool.query("INSERT INTO customer (id, business_id, phone) VALUES ($1, $2, $3)", [
+  await pool.query("INSERT INTO customer (id, business_id, whatsapp_lid) VALUES ($1, $2, $3)", [
     id,
     businessId,
-    phone,
+    lid,
   ]);
   const { rows } = await pool.query("SELECT * FROM customer WHERE id = $1", [id]);
   return rows[0];
@@ -108,6 +97,19 @@ async function updateConversation(id: string, state: string, data: any) {
     JSON.stringify(data),
     id,
   ]);
+}
+
+async function sendBarberPushNotification(expoPushToken: string | null, title: string, body: string) {
+  if (!expoPushToken) return;
+  try {
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ to: expoPushToken, title, body, sound: "default" }),
+    });
+  } catch (err) {
+    console.error("Error enviando push al barbero:", err);
+  }
 }
 
 async function getAvailableSlots(businessId: string, date: string, serviceId: string): Promise<string[]> {
@@ -165,8 +167,8 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
   const business = await getBusiness();
   if (!business) return;
 
-  const phone = normalizePhone(from);
-  const customer = await getOrCreateCustomer(business.id, phone);
+  const lid = extractLid(from);
+  const customer = await getOrCreateCustomer(business.id, lid);
   const conversation = await getOrCreateConversation(customer.id);
   const state = conversation.state;
   const data = conversation.data || {};
@@ -176,7 +178,6 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     await sock.sendMessage(from, { text: msg });
   }
 
-  // Comandos globales, disponibles en cualquier estado
   if (trimmed === "cancelar" || trimmed === "reiniciar") {
     await updateConversation(conversation.id, "START", {});
     await reply("Listo, reiniciamos. Escribí 'hola' cuando quieras reservar un turno.");
@@ -186,7 +187,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
   if (state === "START") {
     if (!customer.name) {
       await updateConversation(conversation.id, "ASK_NAME", {});
-      await reply("Hola 👋 Soy el asistente de ${business.name}. ¿Podrias proporcionar un nombre para identificarte en la agenda?");
+      await reply(`Hola 👋 Soy el asistente de ${business.name}. ¿Cómo te llamás?`);
       return;
     }
 
@@ -227,7 +228,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const list = services.map((s: any, i: number) => `${i + 1}. ${s.name} - ${s.duration_minutes} min`).join("\n");
 
     await updateConversation(conversation.id, "SELECT_SERVICE", { serviceIds: services.map((s: any) => s.id) });
-    await reply(`¡Gracias, ${name}! ¿Qué servicio quieres reservar?\n\n${list}\n\nEscribí el número de la opción.`);
+    await reply(`¡Gracias, ${name}! ¿Qué servicio querés reservar?\n\n${list}\n\nEscribí el número de la opción.`);
     return;
   }
 
@@ -242,8 +243,6 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
 
     const serviceId = serviceIds[choice - 1];
 
-    // Calculamos disponibilidad real de los próximos 8 días (hoy + 7) y
-    // solo mostramos los que efectivamente tienen algún horario libre.
     const candidateDates = Array.from({ length: 8 }, (_, i) => addDays(todayStr(), i));
     const datesWithSlots: string[] = [];
 
@@ -282,7 +281,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     if (slots.length === 0) {
       const list = dates.map((d: string, i: number) => `${i + 1}. ${formatDateOption(d, i)}`).join("\n");
       await reply(`Ese día no hay horarios disponibles. Elegí otro:\n\n${list}`);
-      return; // se queda en SELECT_DATE, con la misma lista de fechas guardada
+      return;
     }
 
     const shown = slots.slice(0, 12);
@@ -357,10 +356,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           ]
         );
 
-               await client.query("COMMIT");
+        await client.query("COMMIT");
         await updateConversation(conversation.id, "START", {});
 
-        const [y, m, d] = data.date.split("-");
         const fechaLegible = formatFullDate(data.date);
 
         if (isApproval) {
@@ -369,19 +367,16 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           await reply(`¡Listo! Tu reserva quedó confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos 🙌`);
         }
 
-        // Notificación al barbero: push si tiene token guardado, y siempre
-        // también por WhatsApp como respaldo (por si no tiene la app abierta
-        // o instalada todavía).
         await sendBarberPushNotification(
           business.expo_push_token,
           "📅 Nueva cita",
-          `${customer.name || phone} — ${serviceName} — ${fechaLegible} ${data.start_time}`
+          `${customer.name} — ${serviceName} — ${fechaLegible} ${data.start_time}`
         );
 
         if (business.phone) {
           const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {
-            text: `📅 Nueva cita\nCliente: ${phone}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
+            text: `📅 Nueva cita\nCliente: ${customer.name}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
           });
         }
       } catch (err) {

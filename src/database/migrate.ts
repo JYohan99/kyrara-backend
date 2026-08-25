@@ -93,6 +93,11 @@ async function migrate() {
     ALTER TABLE conversation ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}';
 
     CREATE INDEX IF NOT EXISTS idx_appointment_slot ON appointment(business_id, date, start_time, end_time);
+
+    ALTER TABLE customer ALTER COLUMN phone DROP NOT NULL;
+    ALTER TABLE customer ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_business_lid ON customer(business_id, whatsapp_lid) WHERE whatsapp_lid IS NOT NULL;
+
   `);
 
   console.log("Migración completa en Postgres (Supabase).");
