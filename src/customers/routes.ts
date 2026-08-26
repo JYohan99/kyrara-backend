@@ -16,13 +16,16 @@ export async function customerRoutes(app: FastifyInstance) {
     if (search) {
       const like = `%${search}%`;
       const { rows } = await pool.query(
-        `SELECT * FROM customer WHERE business_id = $1 AND (name ILIKE $2 OR phone ILIKE $2) ORDER BY name`,
+        `SELECT * FROM customer WHERE business_id = $1 AND active = 1 AND (name ILIKE $2 OR phone ILIKE $2) ORDER BY name`,
         [businessId, like]
       );
       return rows;
     }
 
-    const { rows } = await pool.query("SELECT * FROM customer WHERE business_id = $1 ORDER BY name", [businessId]);
+    const { rows } = await pool.query(
+      "SELECT * FROM customer WHERE business_id = $1 AND active = 1 ORDER BY name",
+      [businessId]
+    );
     return rows;
   });
 
@@ -90,5 +93,16 @@ export async function customerRoutes(app: FastifyInstance) {
 
     const { rows } = await pool.query("SELECT * FROM customer WHERE id = $1", [id]);
     return rows[0];
+  });
+
+  // Borrado suave: no elimina la fila (preserva el historial de reservas
+  // asociadas), solo lo marca como inactivo y deja de aparecer en el listado.
+  app.delete("/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const existingRes = await pool.query("SELECT * FROM customer WHERE id = $1", [id]);
+    if (!existingRes.rows[0]) return reply.status(404).send({ error: "Cliente no encontrado" });
+
+    await pool.query("UPDATE customer SET active = 0 WHERE id = $1", [id]);
+    return reply.status(204).send();
   });
 }
