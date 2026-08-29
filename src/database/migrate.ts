@@ -98,6 +98,7 @@ async function migrate() {
     ALTER TABLE customer ADD COLUMN IF NOT EXISTS whatsapp_lid TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_business_lid ON customer(business_id, whatsapp_lid) WHERE whatsapp_lid IS NOT NULL;
         ALTER TABLE customer ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE business ADD COLUMN IF NOT EXISTS expo_push_token TEXT;
 
   `);
 

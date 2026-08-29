@@ -242,7 +242,6 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     }
 
     const serviceId = serviceIds[choice - 1];
-
     const candidateDates = Array.from({ length: 8 }, (_, i) => addDays(todayStr(), i));
     const datesWithSlots: string[] = [];
 

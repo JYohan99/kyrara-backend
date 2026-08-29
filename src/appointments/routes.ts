@@ -267,4 +267,14 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const servicesRes = await pool.query("SELECT * FROM service WHERE business_id = $1", [business.id]);
     return { business, services: servicesRes.rows };
   });
+  app.post("/business/push-token", async (request, reply) => {
+    const { token } = request.body as { token?: string };
+    if (!token) return reply.status(400).send({ error: "token es obligatorio" });
+
+    const businessId = await getBusinessId();
+    if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
+
+    await pool.query("UPDATE business SET expo_push_token = $1 WHERE id = $2", [token, businessId]);
+    return { status: "ok", token };
+  });
 }
