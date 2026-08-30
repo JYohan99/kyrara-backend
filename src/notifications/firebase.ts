@@ -32,12 +32,19 @@ export async function sendPushNotification(
   token: string | null | undefined,
   title: string,
   body: string,
-  data: Record<string, string> = {}
+  extraData: Record<string, string> = {}
 ) {
   if (!token) {
-    console.log("No hay token de notificación registrado.");
+    console.log("No hay token de notificación registrado en la base de datos.");
     return;
   }
+
+  const payloadData = {
+    title,
+    body,
+    message: body,
+    ...extraData,
+  };
 
   // 1. Envío directo a Firebase Cloud Messaging (FCM)
   if (!token.startsWith("ExponentPushToken[")) {
@@ -49,13 +56,16 @@ export async function sendPushNotification(
           title,
           body,
         },
-        data,
+        data: payloadData,
         android: {
           priority: "high",
           notification: {
             sound: "default",
             channelId: "default",
             priority: "max",
+            defaultSound: true,
+            defaultVibrateTimings: true,
+            visibility: "public",
           },
         },
       });
@@ -71,7 +81,7 @@ export async function sendPushNotification(
     const res = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ to: token, title, body, sound: "default", data }),
+      body: JSON.stringify({ to: token, title, body, sound: "default", data: payloadData }),
     });
     console.log("Notificación push enviada vía Expo Push API, status:", res.status);
   } catch (err) {
