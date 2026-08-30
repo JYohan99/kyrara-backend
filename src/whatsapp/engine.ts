@@ -1,3 +1,4 @@
+import { sendPushNotification } from "../notifications/firebase.js";
 import type { WASocket } from "baileys";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
@@ -100,16 +101,7 @@ async function updateConversation(id: string, state: string, data: any) {
 }
 
 async function sendBarberPushNotification(expoPushToken: string | null, title: string, body: string) {
-  if (!expoPushToken) return;
-  try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ to: expoPushToken, title, body, sound: "default" }),
-    });
-  } catch (err) {
-    console.error("Error enviando push al barbero:", err);
-  }
+  await sendPushNotification(expoPushToken, title, body);
 }
 
 async function getAvailableSlots(businessId: string, date: string, serviceId: string): Promise<string[]> {

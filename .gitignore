@@ -7,3 +7,4 @@ data/*.db-wal
 data/*.db-shm
 *.log
 auth_info_baileys/
+*firebase*.json
