@@ -16,6 +16,36 @@ function dayOfWeek(dateStr: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
+function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): { currentDate: string; currentMinutes: number } {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const year = parts.find((p) => p.type === "year")?.value;
+    const month = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+    const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+    return {
+      currentDate: `${year}-${month}-${day}`,
+      currentMinutes: hour * 60 + minute,
+    };
+  } catch {
+    const now = new Date();
+    const currentDate = now.toISOString().slice(0, 10);
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    return { currentDate, currentMinutes };
+  }
+}
+
 export async function appointmentRoutes(app: FastifyInstance) {
   async function getBusinessId(): Promise<string | null> {
     const { rows } = await pool.query("SELECT id FROM business LIMIT 1");
@@ -46,8 +76,16 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const businessId = await getBusinessId();
     if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
 
-    const businessRes = await pool.query("SELECT slot_step_minutes FROM business WHERE id = $1", [businessId]);
+    const businessRes = await pool.query("SELECT slot_step_minutes, timezone FROM business WHERE id = $1", [businessId]);
     const STEP = businessRes.rows[0]?.slot_step_minutes ?? 30;
+    const timezone = businessRes.rows[0]?.timezone ?? "America/Montevideo";
+
+    const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
+
+    // Si la fecha es anterior a hoy, no hay disponibilidad
+    if (date < currentDate) {
+      return { date, service_id, slots: [] };
+    }
 
     const serviceRes = await pool.query("SELECT * FROM service WHERE id = $1 AND active = 1", [service_id]);
     const service = serviceRes.rows[0];
@@ -92,12 +130,18 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
     const duration = service.duration_minutes;
     const slots: string[] = [];
+    const isToday = date === currentDate;
 
     for (const w of windows) {
       const windowStart = timeToMinutes(w.start_time);
       const windowEnd = timeToMinutes(w.end_time);
 
       for (let start = windowStart; start + duration <= windowEnd; start += STEP) {
+        // Filtrar turnos cuya hora ya pasó en el día de hoy
+        if (isToday && start <= currentMinutes) {
+          continue;
+        }
+
         const end = start + duration;
         const overlaps = blocked.some((b) => start < b.end && end > b.start);
         if (!overlaps) slots.push(minutesToTime(start));
@@ -123,6 +167,14 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const businessId = await getBusinessId();
     if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
 
+    const businessRes = await pool.query("SELECT timezone FROM business WHERE id = $1", [businessId]);
+    const timezone = businessRes.rows[0]?.timezone ?? "America/Montevideo";
+    const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
+
+    if (body.date < currentDate || (body.date === currentDate && timeToMinutes(body.start_time) <= currentMinutes)) {
+      return reply.status(400).send({ error: "No es posible agendar un turno en un horario o fecha que ya pasó." });
+    }
+
     const serviceRes = await pool.query("SELECT duration_minutes FROM service WHERE id = $1", [body.service_id]);
     const service = serviceRes.rows[0];
     if (!service) return reply.status(404).send({ error: "Servicio no encontrado" });
@@ -134,8 +186,6 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const endMin = startMin + service.duration_minutes;
     const endTime = minutesToTime(endMin);
 
-    // Regla 004: transacciÃ³n real de Postgres (BEGIN/COMMIT/ROLLBACK) para
-    // evitar que dos reservas se superpongan si llegan casi al mismo tiempo.
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -149,16 +199,13 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
       if (conflictRes.rows[0]) {
         await client.query("ROLLBACK");
-        return reply.status(409).send({ error: "Ese horario ya no estÃ¡ disponible" });
+        return reply.status(409).send({ error: "El horario ya no está disponible" });
       }
 
       const id = randomUUID();
-      const isManual = (body.created_via ?? "manual") === "manual";
-
       await client.query(
-        `INSERT INTO appointment
-           (id, business_id, customer_id, service_id, date, start_time, end_time, status, created_via)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO appointment (id, business_id, customer_id, service_id, date, start_time, end_time, status, created_via)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'CONFIRMED', $8)`,
         [
           id,
           businessId,
@@ -167,15 +214,12 @@ export async function appointmentRoutes(app: FastifyInstance) {
           body.date,
           body.start_time,
           endTime,
-          isManual ? "CONFIRMED" : "PENDING_APPROVAL",
-          isManual ? "manual" : "whatsapp",
+          body.created_via ?? "manual",
         ]
       );
 
       await client.query("COMMIT");
-
-      const createdRes = await pool.query("SELECT * FROM appointment WHERE id = $1", [id]);
-      return reply.status(201).send(createdRes.rows[0]);
+      return { id, date: body.date, start_time: body.start_time, end_time: endTime, status: "CONFIRMED" };
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -235,7 +279,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return updatedRes.rows[0];
   });
 
-   app.patch("/business/settings", async (request, reply) => {
+  app.patch("/business/settings", async (request, reply) => {
     const { slot_step_minutes, booking_mode } = request.body as {
       slot_step_minutes?: number;
       booking_mode?: "auto" | "approval";
@@ -262,11 +306,12 @@ export async function appointmentRoutes(app: FastifyInstance) {
   app.get("/business", async () => {
     const businessRes = await pool.query("SELECT * FROM business LIMIT 1");
     const business = businessRes.rows[0];
-    if (!business) return { error: "No hay negocio cargado todavÃ­a" };
+    if (!business) return { error: "No hay negocio cargado todavía" };
 
     const servicesRes = await pool.query("SELECT * FROM service WHERE business_id = $1", [business.id]);
     return { business, services: servicesRes.rows };
   });
+
   app.post("/business/push-token", async (request, reply) => {
     const { token } = request.body as { token?: string };
     if (!token) return reply.status(400).send({ error: "token es obligatorio" });

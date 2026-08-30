@@ -4,13 +4,6 @@ import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
 
 function extractLid(jid: string): string {
-  // Este es el identificador que entrega WhatsApp para esta conversaciÃ³n.
-  // Desde hace un tiempo, WhatsApp ya no expone siempre el nÃºmero de
-  // telÃ©fono real por privacidad (usa un cÃ³digo anÃ³nimo, "LID") â€” asÃ­ que
-  // usamos esto como identificador ÃšNICO INTERNO, nunca como el telÃ©fono
-  // real del cliente. El telÃ©fono queda como un campo de datos aparte,
-  // que el barbero puede completar a mano sin que rompa el reconocimiento
-  // de la conversaciÃ³n.
   return jid.split("@")[0];
 }
 
@@ -28,29 +21,58 @@ function dayOfWeek(dateStr: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-const DIAS = ["Domingo", "Lunes", "Martes", "MiÃ©rcoles", "Jueves", "Viernes", "SÃ¡bado"];
+function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): { currentDate: string; currentMinutes: number } {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const year = parts.find((p) => p.type === "year")?.value;
+    const month = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+    const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+    return {
+      currentDate: `${year}-${month}-${day}`,
+      currentMinutes: hour * 60 + minute,
+    };
+  } catch {
+    const now = new Date();
+    const currentDate = now.toISOString().slice(0, 10);
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    return { currentDate, currentMinutes };
+  }
+}
+
+const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const MESES = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
-function formatDateOption(dateStr: string, index: number): string {
+
+function formatDateOption(dateStr: string, currentDate: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   const label = `${weekday} ${d.toString().padStart(2, "0")}/${m.toString().padStart(2, "0")}`;
-  if (index === 0) return `Hoy (${label})`;
-  if (index === 1) return `MaÃ±ana (${label})`;
+  if (dateStr === currentDate) return `Hoy (${label})`;
+  if (dateStr === addDays(currentDate, 1)) return `Mañana (${label})`;
   return label;
 }
+
 function formatFullDate(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -104,7 +126,12 @@ async function sendBarberPushNotification(expoPushToken: string | null, title: s
   await sendPushNotification(expoPushToken, title, body);
 }
 
-async function getAvailableSlots(businessId: string, date: string, serviceId: string): Promise<string[]> {
+async function getAvailableSlots(businessId: string, date: string, serviceId: string, timezone: string = "America/Montevideo"): Promise<string[]> {
+  const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
+
+  // Si la fecha es anterior a hoy, no hay disponibilidad
+  if (date < currentDate) return [];
+
   const businessRes = await pool.query("SELECT slot_step_minutes FROM business WHERE id = $1", [businessId]);
   const STEP = businessRes.rows[0]?.slot_step_minutes ?? 30;
 
@@ -142,11 +169,17 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
 
   const duration = service.duration_minutes;
   const slots: string[] = [];
+  const isToday = date === currentDate;
 
   for (const w of windows) {
     const windowStart = timeToMinutes(w.start_time);
     const windowEnd = timeToMinutes(w.end_time);
     for (let start = windowStart; start + duration <= windowEnd; start += STEP) {
+      // Filtrar turnos que ya pasaron en el día de hoy
+      if (isToday && start <= currentMinutes) {
+        continue;
+      }
+
       const end = start + duration;
       const overlaps = blocked.some((b) => start < b.end && end > b.start);
       if (!overlaps) slots.push(minutesToTime(start));
@@ -165,113 +198,95 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
   const state = conversation.state;
   const data = conversation.data || {};
   const trimmed = text.trim().toLowerCase();
+  const timezone = business.timezone || "America/Montevideo";
 
   async function reply(msg: string) {
     await sock.sendMessage(from, { text: msg });
   }
 
-  if (trimmed === "cancelar" || trimmed === "reiniciar") {
+  // Comandos globales
+  if (trimmed === "cancelar" || trimmed === "menu" || trimmed === "inicio" || trimmed === "reiniciar") {
     await updateConversation(conversation.id, "START", {});
-    await reply("Listo, reiniciamos. EscribÃ­ 'hola' cuando quieras reservar un turno.");
+    await reply("Conversación reiniciada. Escribí 'hola' para ver los servicios disponibles.");
     return;
   }
 
   if (state === "START") {
-    if (!customer.name) {
-      await updateConversation(conversation.id, "ASK_NAME", {});
-      await reply(`Hola ðŸ‘‹ Soy el asistente de ${business.name}. Â¿CÃ³mo te llamÃ¡s?`);
-      return;
-    }
-
-    const servicesRes = await pool.query(
+    const { rows: services } = await pool.query(
       "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
       [business.id]
     );
-    const services = servicesRes.rows;
 
     if (services.length === 0) {
-      await reply("Por ahora no hay servicios disponibles. ProbÃ¡ mÃ¡s tarde.");
+      await reply("¡Hola! En este momento no tenemos servicios disponibles. Consultanos más tarde.");
       return;
     }
 
-    const list = services.map((s: any, i: number) => `${i + 1}. ${s.name} - ${s.duration_minutes} min`).join("\n");
+    const list = services
+      .map((s: any, i: number) => {
+        const precio = s.price ? ` — $${s.price}` : "";
+        return `${i + 1}. ${s.name} (${s.duration_minutes} min)${precio}`;
+      })
+      .join("\n");
 
-    await updateConversation(conversation.id, "SELECT_SERVICE", { serviceIds: services.map((s: any) => s.id) });
-    await reply(`Â¡Hola ${customer.name}! Â¿QuÃ© servicio querÃ©s reservar?\n\n${list}\n\nEscribÃ­ el nÃºmero de la opciÃ³n.`);
-    return;
-  }
-
-  if (state === "ASK_NAME") {
-    const name = text.trim();
-    if (!name) {
-      await reply("No entendÃ­. Â¿CÃ³mo te llamÃ¡s?");
-      return;
-    }
-
-    await pool.query("UPDATE customer SET name = $1 WHERE id = $2", [name, customer.id]);
-    customer.name = name;
-
-    const servicesRes = await pool.query(
-      "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
-      [business.id]
-    );
-    const services = servicesRes.rows;
-
-    const list = services.map((s: any, i: number) => `${i + 1}. ${s.name} - ${s.duration_minutes} min`).join("\n");
-
-    await updateConversation(conversation.id, "SELECT_SERVICE", { serviceIds: services.map((s: any) => s.id) });
-    await reply(`Â¡Gracias, ${name}! Â¿QuÃ© servicio querÃ©s reservar?\n\n${list}\n\nEscribÃ­ el nÃºmero de la opciÃ³n.`);
+    const saludo = business.name ? `¡Hola! Bienvenido a *${business.name}* ??` : "¡Hola! Bienvenido ??";
+    await updateConversation(conversation.id, "SELECT_SERVICE", {
+      serviceIds: services.map((s: any) => s.id),
+    });
+    await reply(`${saludo}\n\nElegí el servicio que querés agendar:\n\n${list}\n\nEscribí el número de la opción.`);
     return;
   }
 
   if (state === "SELECT_SERVICE") {
     const choice = parseInt(trimmed, 10);
-    const serviceIds = data.serviceIds || [];
+    const serviceIds: string[] = data.serviceIds || [];
 
     if (isNaN(choice) || choice < 1 || choice > serviceIds.length) {
-      await reply("No entendÃ­ esa opciÃ³n. EscribÃ­ el nÃºmero del servicio que querÃ©s.");
+      await reply("No entendí esa opción. Escribí el número del servicio que querés.");
       return;
     }
 
     const serviceId = serviceIds[choice - 1];
-    const candidateDates = Array.from({ length: 8 }, (_, i) => addDays(todayStr(), i));
+    const { currentDate } = getCurrentDateAndMinutes(timezone);
+    const candidateDates = Array.from({ length: 8 }, (_, i) => addDays(currentDate, i));
     const datesWithSlots: string[] = [];
 
     for (const d of candidateDates) {
-      const slots = await getAvailableSlots(business.id, d, serviceId);
+      const slots = await getAvailableSlots(business.id, d, serviceId, timezone);
       if (slots.length > 0) datesWithSlots.push(d);
     }
 
     if (datesWithSlots.length === 0) {
       await updateConversation(conversation.id, "START", {});
-      await reply("No hay horarios disponibles en los prÃ³ximos dÃ­as para ese servicio. ProbÃ¡ escribiendo mÃ¡s tarde ðŸ™");
+      await reply("No hay horarios disponibles en los próximos días para ese servicio. Probá consultando más tarde.");
       return;
     }
 
     const list = datesWithSlots
-      .map((d, i) => `${i + 1}. ${formatDateOption(d, candidateDates.indexOf(d))}`)
+      .map((d, i) => `${i + 1}. ${formatDateOption(d, currentDate)}`)
       .join("\n");
 
     await updateConversation(conversation.id, "SELECT_DATE", { ...data, service_id: serviceId, dates: datesWithSlots });
-    await reply(`Perfecto. Â¿Para quÃ© dÃ­a?\n\n${list}\n\nEscribÃ­ el nÃºmero de la opciÃ³n.`);
+    await reply(`Perfecto. ¿Para qué día?\n\n${list}\n\nEscribí el número de la opción.`);
     return;
   }
 
   if (state === "SELECT_DATE") {
     const choice = parseInt(trimmed, 10);
     const dates = data.dates || [];
+    const { currentDate } = getCurrentDateAndMinutes(timezone);
 
     if (isNaN(choice) || choice < 1 || choice > dates.length) {
-      await reply("No entendÃ­ esa opciÃ³n. EscribÃ­ el nÃºmero del dÃ­a que preferÃ­s.");
+      await reply("No entendí esa opción. Escribí el número del día que preferís.");
       return;
     }
 
     const date = dates[choice - 1];
-    const slots = await getAvailableSlots(business.id, date, data.service_id);
+    const slots = await getAvailableSlots(business.id, date, data.service_id, timezone);
 
     if (slots.length === 0) {
-      const list = dates.map((d: string, i: number) => `${i + 1}. ${formatDateOption(d, i)}`).join("\n");
-      await reply(`Ese dÃ­a no hay horarios disponibles. ElegÃ­ otro:\n\n${list}`);
+      const list = dates.map((d: string, i: number) => `${i + 1}. ${formatDateOption(d, currentDate)}`).join("\n");
+      await reply(`Ese día no tiene horarios disponibles. Elegí otro:\n\n${list}`);
       return;
     }
 
@@ -279,7 +294,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const list = shown.map((s, i) => `${i + 1}. ${s}`).join("\n");
 
     await updateConversation(conversation.id, "SELECT_TIME", { ...data, date, slots: shown });
-    await reply(`Horarios disponibles:\n\n${list}\n\nEscribÃ­ el nÃºmero del horario que preferÃ­s.`);
+    await reply(`Horarios disponibles:\n\n${list}\n\nEscribí el número del horario que preferís.`);
     return;
   }
 
@@ -288,55 +303,108 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const slots = data.slots || [];
 
     if (isNaN(choice) || choice < 1 || choice > slots.length) {
-      await reply("No entendÃ­ esa opciÃ³n. EscribÃ­ el nÃºmero del horario.");
+      await reply("No entendí esa opción. Escribí el número del horario.");
       return;
     }
 
     const startTime = slots[choice - 1];
-    const serviceRes = await pool.query("SELECT name FROM service WHERE id = $1", [data.service_id]);
-    const serviceName = serviceRes.rows[0]?.name ?? "";
 
-    await updateConversation(conversation.id, "CONFIRMATION", { ...data, start_time: startTime });
+    const serviceRes = await pool.query("SELECT * FROM service WHERE id = $1", [data.service_id]);
+    const service = serviceRes.rows[0];
+    const serviceName = service?.name || "Servicio";
+    const precio = service?.price ? ` ($${service.price})` : "";
+    const fechaLegible = formatFullDate(data.date);
+
+    if (!customer.name) {
+      await updateConversation(conversation.id, "ASK_NAME", {
+        ...data,
+        start_time: startTime,
+        service_name: serviceName,
+        price_text: precio,
+      });
+      await reply(`Excelente. Antes de confirmar, ¿cuál es tu nombre?`);
+      return;
+    }
+
+    await updateConversation(conversation.id, "CONFIRM", {
+      ...data,
+      start_time: startTime,
+      service_name: serviceName,
+      price_text: precio,
+    });
+
     await reply(
-      `Servicio: ${serviceName}\nFecha: ${formatFullDate(data.date)}\nHora: ${startTime}\n\nÂ¿ConfirmÃ¡s?\n1. SÃ­\n2. Cambiar`
+      `¿Confirmás la reserva?\n\n` +
+      `?? *Cliente:* ${customer.name}\n` +
+      `?? *Servicio:* ${serviceName}${precio}\n` +
+      `?? *Fecha:* ${fechaLegible}\n` +
+      `? *Hora:* ${startTime}\n\n` +
+      `1. Confirmar\n` +
+      `2. Cambiar datos`
     );
     return;
   }
 
-  if (state === "CONFIRMATION") {
-    if (trimmed === "1" || trimmed === "si" || trimmed === "sÃ­") {
+  if (state === "ASK_NAME") {
+    const name = text.trim();
+    if (!name || name.length < 2) {
+      await reply("Por favor ingresá un nombre válido.");
+      return;
+    }
+
+    await pool.query("UPDATE customer SET name = $1 WHERE id = $2", [name, customer.id]);
+    customer.name = name;
+
+    const fechaLegible = formatFullDate(data.date);
+
+    await updateConversation(conversation.id, "CONFIRM", { ...data, customer_name: name });
+
+    await reply(
+      `¿Confirmás la reserva?\n\n` +
+      `?? *Cliente:* ${name}\n` +
+      `?? *Servicio:* ${data.service_name}${data.price_text || ""}\n` +
+      `?? *Fecha:* ${fechaLegible}\n` +
+      `? *Hora:* ${data.start_time}\n\n` +
+      `1. Confirmar\n` +
+      `2. Cambiar datos`
+    );
+    return;
+  }
+
+  if (state === "CONFIRM") {
+    if (trimmed === "1" || trimmed === "si" || trimmed === "confirmar") {
+      const serviceRes = await pool.query("SELECT * FROM service WHERE id = $1", [data.service_id]);
+      const service = serviceRes.rows[0];
+      const serviceName = service?.name || "Servicio";
+      const duration = service?.duration_minutes || 30;
+      const endTime = minutesToTime(timeToMinutes(data.start_time) + duration);
+
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
 
-        const serviceRes = await client.query("SELECT duration_minutes, name FROM service WHERE id = $1", [
-          data.service_id,
-        ]);
-        const duration = serviceRes.rows[0].duration_minutes;
-        const serviceName = serviceRes.rows[0].name;
-        const startMin = timeToMinutes(data.start_time);
-        const endTime = minutesToTime(startMin + duration);
-
         const conflictRes = await client.query(
-          `SELECT id FROM appointment WHERE business_id = $1 AND date = $2 AND status != 'CANCELLED'
+          `SELECT id FROM appointment
+           WHERE business_id = $1 AND date = $2 AND status != 'CANCELLED'
            AND start_time < $3 AND end_time > $4`,
           [business.id, data.date, endTime, data.start_time]
         );
 
         if (conflictRes.rows[0]) {
           await client.query("ROLLBACK");
-          await updateConversation(conversation.id, "SELECT_DATE", { service_id: data.service_id });
-          await reply("Uy, justo se ocupÃ³ ese horario. ProbÃ¡ con otra fecha (DD/MM).");
+          await updateConversation(conversation.id, "START", {});
+          await reply("¡Ups! Justo alguien tomó ese horario hace un instante. Escribí 'hola' para elegir otro.");
           return;
         }
 
+        const appointmentId = randomUUID();
         const isApproval = business.booking_mode === "approval";
-        const id = randomUUID();
+
         await client.query(
           `INSERT INTO appointment (id, business_id, customer_id, service_id, date, start_time, end_time, status, created_via)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'whatsapp')`,
           [
-            id,
+            appointmentId,
             business.id,
             customer.id,
             data.service_id,
@@ -353,21 +421,21 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
         const fechaLegible = formatFullDate(data.date);
 
         if (isApproval) {
-          await reply("Â¡Gracias! Tu reserva estÃ¡ pendiente de confirmaciÃ³n del barbero. Te avisamos apenas la acepte.");
+          await reply("¡Gracias! Tu reserva está pendiente de confirmación del barbero. Te avisamos apenas la acepte.");
         } else {
-          await reply(`Â¡Listo! Tu reserva quedÃ³ confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos ðŸ™Œ`);
+          await reply(`¡Listo! Tu reserva quedó confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos ??`);
         }
 
         await sendBarberPushNotification(
           business.expo_push_token,
-          "ðŸ“… Nueva cita",
-          `${customer.name} â€” ${serviceName} â€” ${fechaLegible} ${data.start_time}`
+          "?? Nueva cita",
+          `${customer.name} — ${serviceName} — ${fechaLegible} ${data.start_time}`
         );
 
         if (business.phone) {
           const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {
-            text: `ðŸ“… Nueva cita\nCliente: ${customer.name}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
+            text: `?? Nueva cita\nCliente: ${customer.name}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
           });
         }
       } catch (err) {
@@ -381,11 +449,11 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
 
     if (trimmed === "2" || trimmed === "cambiar") {
       await updateConversation(conversation.id, "START", {});
-      await reply("Dale, arranquemos de nuevo. EscribÃ­ 'hola' para ver los servicios.");
+      await reply("Dale, arranquemos de nuevo. Escribí 'hola' para ver los servicios.");
       return;
     }
 
-    await reply("RespondÃ© 1 para confirmar o 2 para cambiar.");
+    await reply("Respondé 1 para confirmar o 2 para cambiar.");
     return;
   }
 }
