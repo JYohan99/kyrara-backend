@@ -1,4 +1,5 @@
-import admin from "firebase-admin";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,29 +7,26 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let firebaseInitialized = false;
-
-function initFirebase() {
-  if (firebaseInitialized) return;
-
-  const keyPath = path.resolve(__dirname, "../../firebase-service-account.json");
-  if (fs.existsSync(keyPath)) {
-    try {
-      const serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-      firebaseInitialized = true;
-      console.log("Firebase Admin SDK inicializado correctamente con credenciales.");
-    } catch (err) {
-      console.error("Error al inicializar Firebase Admin:", err);
+function getFirebaseMessaging() {
+  if (getApps().length === 0) {
+    const keyPath = path.resolve(__dirname, "../../firebase-service-account.json");
+    if (fs.existsSync(keyPath)) {
+      try {
+        const serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
+        initializeApp({
+          credential: cert(serviceAccount),
+        });
+        console.log("Firebase Admin inicializado exitosamente.");
+      } catch (err) {
+        console.error("Error al inicializar Firebase Admin:", err);
+      }
+    } else {
+      console.warn("No se encontró firebase-service-account.json en el backend.");
     }
-  } else {
-    console.warn("No se encontró firebase-service-account.json en el backend.");
   }
-}
 
-initFirebase();
+  return getMessaging();
+}
 
 export async function sendPushNotification(
   token: string | null | undefined,
@@ -37,18 +35,15 @@ export async function sendPushNotification(
   data: Record<string, string> = {}
 ) {
   if (!token) {
-    console.log("No hay token de notificación registrado para enviar push.");
+    console.log("No hay token de notificación registrado.");
     return;
   }
 
-  // 1. Si es un token nativo de Firebase (FCM)
+  // 1. Envío directo a Firebase Cloud Messaging (FCM)
   if (!token.startsWith("ExponentPushToken[")) {
-    if (!firebaseInitialized) {
-      initFirebase();
-    }
-
     try {
-      const response = await admin.messaging().send({
+      const messaging = getFirebaseMessaging();
+      const response = await messaging.send({
         token,
         notification: {
           title,
@@ -71,7 +66,7 @@ export async function sendPushNotification(
     }
   }
 
-  // 2. Si es un token de Expo (Fallback)
+  // 2. Fallback para Expo Push Token
   try {
     const res = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
