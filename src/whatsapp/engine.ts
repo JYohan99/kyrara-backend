@@ -11,11 +11,13 @@ function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
+
 function minutesToTime(mins: number): string {
   const h = Math.floor(mins / 60).toString().padStart(2, "0");
   const m = (mins % 60).toString().padStart(2, "0");
   return `${h}:${m}`;
 }
+
 function dayOfWeek(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
@@ -51,7 +53,7 @@ function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): { cu
   }
 }
 
-const DIAS = ["Domingo", "Lunes", "Martes", "MiÈrcoles", "Jueves", "Viernes", "S·bado"];
+const DIAS = ["Domingo", "Lunes", "Martes", "Mi√©rcoles", "Jueves", "Viernes", "S√°bado"];
 const MESES = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
@@ -69,7 +71,7 @@ function formatDateOption(dateStr: string, currentDate: string): string {
   const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   const label = `${weekday} ${d.toString().padStart(2, "0")}/${m.toString().padStart(2, "0")}`;
   if (dateStr === currentDate) return `Hoy (${label})`;
-  if (dateStr === addDays(currentDate, 1)) return `MaÒana (${label})`;
+  if (dateStr === addDays(currentDate, 1)) return `Ma√±ana (${label})`;
   return label;
 }
 
@@ -129,7 +131,6 @@ async function sendBarberPushNotification(expoPushToken: string | null, title: s
 async function getAvailableSlots(businessId: string, date: string, serviceId: string, timezone: string = "America/Montevideo"): Promise<string[]> {
   const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
 
-  // Si la fecha es anterior a hoy, no hay disponibilidad
   if (date < currentDate) return [];
 
   const businessRes = await pool.query("SELECT slot_step_minutes FROM business WHERE id = $1", [businessId]);
@@ -175,7 +176,6 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
     const windowStart = timeToMinutes(w.start_time);
     const windowEnd = timeToMinutes(w.end_time);
     for (let start = windowStart; start + duration <= windowEnd; start += STEP) {
-      // Filtrar turnos que ya pasaron en el dÌa de hoy
       if (isToday && start <= currentMinutes) {
         continue;
       }
@@ -204,10 +204,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     await sock.sendMessage(from, { text: msg });
   }
 
-  // Comandos globales
   if (trimmed === "cancelar" || trimmed === "menu" || trimmed === "inicio" || trimmed === "reiniciar") {
     await updateConversation(conversation.id, "START", {});
-    await reply("ConversaciÛn reiniciada. EscribÌ 'hola' para ver los servicios disponibles.");
+    await reply("Conversaci√≥n reiniciada. Escrib√≠ 'hola' para ver los servicios disponibles.");
     return;
   }
 
@@ -218,22 +217,22 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     );
 
     if (services.length === 0) {
-      await reply("°Hola! En este momento no tenemos servicios disponibles. Consultanos m·s tarde.");
+      await reply("¬°Hola! En este momento no tenemos servicios disponibles. Consultanos m√°s tarde.");
       return;
     }
 
     const list = services
       .map((s: any, i: number) => {
-        const precio = s.price ? ` ó $${s.price}` : "";
+        const precio = s.price ? ` ‚Äî $${s.price}` : "";
         return `${i + 1}. ${s.name} (${s.duration_minutes} min)${precio}`;
       })
       .join("\n");
 
-    const saludo = business.name ? `°Hola! Bienvenido a *${business.name}* ??` : "°Hola! Bienvenido ??";
+    const saludo = business.name ? `¬°Hola! Bienvenido a *${business.name}* ‚úÇÔ∏è` : "¬°Hola! Bienvenido ‚úÇÔ∏è";
     await updateConversation(conversation.id, "SELECT_SERVICE", {
       serviceIds: services.map((s: any) => s.id),
     });
-    await reply(`${saludo}\n\nElegÌ el servicio que querÈs agendar:\n\n${list}\n\nEscribÌ el n˙mero de la opciÛn.`);
+    await reply(`${saludo}\n\nEleg√≠ el servicio que quer√©s agendar:\n\n${list}\n\nEscrib√≠ el n√∫mero de la opci√≥n.`);
     return;
   }
 
@@ -242,7 +241,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const serviceIds: string[] = data.serviceIds || [];
 
     if (isNaN(choice) || choice < 1 || choice > serviceIds.length) {
-      await reply("No entendÌ esa opciÛn. EscribÌ el n˙mero del servicio que querÈs.");
+      await reply("No entend√≠ esa opci√≥n. Escrib√≠ el n√∫mero del servicio que quer√©s.");
       return;
     }
 
@@ -258,7 +257,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
 
     if (datesWithSlots.length === 0) {
       await updateConversation(conversation.id, "START", {});
-      await reply("No hay horarios disponibles en los prÛximos dÌas para ese servicio. Prob· consultando m·s tarde.");
+      await reply("No hay horarios disponibles en los pr√≥ximos d√≠as para ese servicio. Prob√° consultando m√°s tarde.");
       return;
     }
 
@@ -267,7 +266,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
       .join("\n");
 
     await updateConversation(conversation.id, "SELECT_DATE", { ...data, service_id: serviceId, dates: datesWithSlots });
-    await reply(`Perfecto. øPara quÈ dÌa?\n\n${list}\n\nEscribÌ el n˙mero de la opciÛn.`);
+    await reply(`Perfecto. ¬øPara qu√© d√≠a?\n\n${list}\n\nEscrib√≠ el n√∫mero de la opci√≥n.`);
     return;
   }
 
@@ -277,7 +276,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const { currentDate } = getCurrentDateAndMinutes(timezone);
 
     if (isNaN(choice) || choice < 1 || choice > dates.length) {
-      await reply("No entendÌ esa opciÛn. EscribÌ el n˙mero del dÌa que preferÌs.");
+      await reply("No entend√≠ esa opci√≥n. Escrib√≠ el n√∫mero del d√≠a que prefer√≠s.");
       return;
     }
 
@@ -286,7 +285,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
 
     if (slots.length === 0) {
       const list = dates.map((d: string, i: number) => `${i + 1}. ${formatDateOption(d, currentDate)}`).join("\n");
-      await reply(`Ese dÌa no tiene horarios disponibles. ElegÌ otro:\n\n${list}`);
+      await reply(`Ese d√≠a no tiene horarios disponibles. Eleg√≠ otro:\n\n${list}`);
       return;
     }
 
@@ -294,7 +293,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const list = shown.map((s, i) => `${i + 1}. ${s}`).join("\n");
 
     await updateConversation(conversation.id, "SELECT_TIME", { ...data, date, slots: shown });
-    await reply(`Horarios disponibles:\n\n${list}\n\nEscribÌ el n˙mero del horario que preferÌs.`);
+    await reply(`Horarios disponibles:\n\n${list}\n\nEscrib√≠ el n√∫mero del horario que prefer√≠s.`);
     return;
   }
 
@@ -303,7 +302,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const slots = data.slots || [];
 
     if (isNaN(choice) || choice < 1 || choice > slots.length) {
-      await reply("No entendÌ esa opciÛn. EscribÌ el n˙mero del horario.");
+      await reply("No entend√≠ esa opci√≥n. Escrib√≠ el n√∫mero del horario.");
       return;
     }
 
@@ -322,7 +321,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
         service_name: serviceName,
         price_text: precio,
       });
-      await reply(`Excelente. Antes de confirmar, øcu·l es tu nombre?`);
+      await reply("Excelente. Antes de confirmar, ¬øcu√°l es tu nombre?");
       return;
     }
 
@@ -334,11 +333,11 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     });
 
     await reply(
-      `øConfirm·s la reserva?\n\n` +
-      `?? *Cliente:* ${customer.name}\n` +
-      `?? *Servicio:* ${serviceName}${precio}\n` +
-      `?? *Fecha:* ${fechaLegible}\n` +
-      `? *Hora:* ${startTime}\n\n` +
+      `¬øConfirm√°s la reserva?\n\n` +
+      `üë§ *Cliente:* ${customer.name}\n` +
+      `‚úÇÔ∏è *Servicio:* ${serviceName}${precio}\n` +
+      `üìÖ *Fecha:* ${fechaLegible}\n` +
+      `‚è∞ *Hora:* ${startTime}\n\n` +
       `1. Confirmar\n` +
       `2. Cambiar datos`
     );
@@ -348,7 +347,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
   if (state === "ASK_NAME") {
     const name = text.trim();
     if (!name || name.length < 2) {
-      await reply("Por favor ingres· un nombre v·lido.");
+      await reply("Por favor ingres√° un nombre v√°lido.");
       return;
     }
 
@@ -360,11 +359,11 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     await updateConversation(conversation.id, "CONFIRM", { ...data, customer_name: name });
 
     await reply(
-      `øConfirm·s la reserva?\n\n` +
-      `?? *Cliente:* ${name}\n` +
-      `?? *Servicio:* ${data.service_name}${data.price_text || ""}\n` +
-      `?? *Fecha:* ${fechaLegible}\n` +
-      `? *Hora:* ${data.start_time}\n\n` +
+      `¬øConfirm√°s la reserva?\n\n` +
+      `üë§ *Cliente:* ${name}\n` +
+      `‚úÇÔ∏è *Servicio:* ${data.service_name}${data.price_text || ""}\n` +
+      `üìÖ *Fecha:* ${fechaLegible}\n` +
+      `‚è∞ *Hora:* ${data.start_time}\n\n` +
       `1. Confirmar\n` +
       `2. Cambiar datos`
     );
@@ -393,7 +392,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
         if (conflictRes.rows[0]) {
           await client.query("ROLLBACK");
           await updateConversation(conversation.id, "START", {});
-          await reply("°Ups! Justo alguien tomÛ ese horario hace un instante. EscribÌ 'hola' para elegir otro.");
+          await reply("¬°Ups! Justo alguien tom√≥ ese horario hace un instante. Escrib√≠ 'hola' para elegir otro.");
           return;
         }
 
@@ -421,21 +420,21 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
         const fechaLegible = formatFullDate(data.date);
 
         if (isApproval) {
-          await reply("°Gracias! Tu reserva est· pendiente de confirmaciÛn del barbero. Te avisamos apenas la acepte.");
+          await reply("¬°Gracias! Tu reserva est√° pendiente de confirmaci√≥n del barbero. Te avisamos apenas la acepte.");
         } else {
-          await reply(`°Listo! Tu reserva quedÛ confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos ??`);
+          await reply(`¬°Listo! Tu reserva qued√≥ confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos ‚úÇÔ∏è`);
         }
 
         await sendBarberPushNotification(
           business.expo_push_token,
-          "?? Nueva cita",
-          `${customer.name} ó ${serviceName} ó ${fechaLegible} ${data.start_time}`
+          "üìÖ Nueva cita",
+          `${customer.name} ‚Äî ${serviceName} ‚Äî ${fechaLegible} ${data.start_time}`
         );
 
         if (business.phone) {
           const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {
-            text: `?? Nueva cita\nCliente: ${customer.name}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
+            text: `üìÖ Nueva cita\nCliente: ${customer.name}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
           });
         }
       } catch (err) {
@@ -449,11 +448,11 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
 
     if (trimmed === "2" || trimmed === "cambiar") {
       await updateConversation(conversation.id, "START", {});
-      await reply("Dale, arranquemos de nuevo. EscribÌ 'hola' para ver los servicios.");
+      await reply("Dale, arranquemos de nuevo. Escrib√≠ 'hola' para ver los servicios.");
       return;
     }
 
-    await reply("RespondÈ 1 para confirmar o 2 para cambiar.");
+    await reply("Respond√© 1 para confirmar o 2 para cambiar.");
     return;
   }
 }

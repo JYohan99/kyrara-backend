@@ -82,7 +82,6 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
     const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
 
-    // Si la fecha es anterior a hoy, no hay disponibilidad
     if (date < currentDate) {
       return { date, service_id, slots: [] };
     }
@@ -137,7 +136,6 @@ export async function appointmentRoutes(app: FastifyInstance) {
       const windowEnd = timeToMinutes(w.end_time);
 
       for (let start = windowStart; start + duration <= windowEnd; start += STEP) {
-        // Filtrar turnos cuya hora ya pasó en el día de hoy
         if (isToday && start <= currentMinutes) {
           continue;
         }
@@ -172,7 +170,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
 
     if (body.date < currentDate || (body.date === currentDate && timeToMinutes(body.start_time) <= currentMinutes)) {
-      return reply.status(400).send({ error: "No es posible agendar un turno en un horario o fecha que ya pasó." });
+      return reply.status(400).send({ error: "No es posible agendar un turno en un horario o fecha que ya pasÃ³." });
     }
 
     const serviceRes = await pool.query("SELECT duration_minutes FROM service WHERE id = $1", [body.service_id]);
@@ -199,7 +197,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
       if (conflictRes.rows[0]) {
         await client.query("ROLLBACK");
-        return reply.status(409).send({ error: "El horario ya no está disponible" });
+        return reply.status(409).send({ error: "El horario ya no estÃ¡ disponible" });
       }
 
       const id = randomUUID();
@@ -306,7 +304,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
   app.get("/business", async () => {
     const businessRes = await pool.query("SELECT * FROM business LIMIT 1");
     const business = businessRes.rows[0];
-    if (!business) return { error: "No hay negocio cargado todavía" };
+    if (!business) return { error: "No hay negocio cargado todavÃ­a" };
 
     const servicesRes = await pool.query("SELECT * FROM service WHERE business_id = $1", [business.id]);
     return { business, services: servicesRes.rows };
