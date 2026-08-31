@@ -3,27 +3,49 @@ import type { WASocket } from "baileys";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
 
+// ============================================================================
+// SECCIÓN 1: UTILIDADES AUXILIARES (WHATSAPP, TIEMPO, FECHAS Y TEXTO)
+// ============================================================================
+
+/**
+ * Extrae el identificador LID único de WhatsApp para esta conversación.
+ */
 function extractLid(jid: string): string {
   return jid.split("@")[0];
 }
 
+/**
+ * Convierte un string "HH:mm" a minutos totales desde las 00:00.
+ */
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
 
+/**
+ * Convierte minutos totales a string con formato "HH:mm".
+ */
 function minutesToTime(mins: number): string {
   const h = Math.floor(mins / 60).toString().padStart(2, "0");
   const m = (mins % 60).toString().padStart(2, "0");
   return `${h}:${m}`;
 }
 
+/**
+ * Obtiene el índice del día de la semana (0 = Domingo ... 6 = Sábado).
+ */
 function dayOfWeek(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): { currentDate: string; currentMinutes: number } {
+/**
+ * Obtiene la fecha actual ("YYYY-MM-DD") y la hora actual en minutos para la zona horaria del negocio.
+ */
+function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): {
+  currentDate: string;
+  currentMinutes: number;
+} {
   try {
     const now = new Date();
     const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -59,6 +81,9 @@ const MESES = [
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
 
+/**
+ * Suma N días a una fecha en formato "YYYY-MM-DD".
+ */
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -66,6 +91,9 @@ function addDays(dateStr: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * Genera el texto legible para una opción de día (ej: "Hoy (Lunes 31/08)", "Mañana (Martes 01/09)").
+ */
 function formatDateOption(dateStr: string, currentDate: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -75,17 +103,30 @@ function formatDateOption(dateStr: string, currentDate: string): string {
   return label;
 }
 
+/**
+ * Formatea una fecha completa para la confirmación (ej: "Lunes 31 de agosto").
+ */
 function formatFullDate(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const weekday = DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   return `${weekday} ${d} de ${MESES[m - 1]}`;
 }
 
+// ============================================================================
+// SECCIÓN 2: CONSULTAS Y GESTIÓN DE CLIENTES Y CONVERSACIONES
+// ============================================================================
+
+/**
+ * Obtiene la información general del negocio.
+ */
 async function getBusiness() {
   const { rows } = await pool.query("SELECT * FROM business LIMIT 1");
   return rows[0];
 }
 
+/**
+ * Busca o crea un cliente en la base de datos a partir de su ID de WhatsApp (LID).
+ */
 async function getOrCreateCustomer(businessId: string, lid: string) {
   const existing = await pool.query(
     "SELECT * FROM customer WHERE business_id = $1 AND whatsapp_lid = $2",
@@ -103,6 +144,9 @@ async function getOrCreateCustomer(businessId: string, lid: string) {
   return rows[0];
 }
 
+/**
+ * Busca o inicializa el estado de la conversación con el cliente.
+ */
 async function getOrCreateConversation(customerId: string) {
   const existing = await pool.query("SELECT * FROM conversation WHERE customer_id = $1", [customerId]);
   if (existing.rows[0]) return existing.rows[0];
@@ -116,6 +160,9 @@ async function getOrCreateConversation(customerId: string) {
   return rows[0];
 }
 
+/**
+ * Actualiza el estado y datos temporales de la conversación en PostgreSQL.
+ */
 async function updateConversation(id: string, state: string, data: any) {
   await pool.query("UPDATE conversation SET state = $1, data = $2, updated_at = NOW() WHERE id = $3", [
     state,
@@ -124,13 +171,25 @@ async function updateConversation(id: string, state: string, data: any) {
   ]);
 }
 
+/**
+ * Envía una notificación push directa al teléfono del barbero vía Firebase FCM.
+ */
 async function sendBarberPushNotification(expoPushToken: string | null, title: string, body: string) {
   await sendPushNotification(expoPushToken, title, body);
 }
 
+// ============================================================================
+// SECCIÓN 3: CÁLCULO Y FILTRADO DE HORARIOS DISPONIBLES (SLOTS)
+// ============================================================================
+
+/**
+ * Calcula los turnos libres para una fecha y servicio determinados.
+ * Descarta automáticamente turnos pasados del día de hoy y horarios ocupados.
+ */
 async function getAvailableSlots(businessId: string, date: string, serviceId: string, timezone: string = "America/Montevideo"): Promise<string[]> {
   const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
 
+  // Si la fecha ya pasó respecto a hoy, no hay disponibilidad
   if (date < currentDate) return [];
 
   const businessRes = await pool.query("SELECT slot_step_minutes FROM business WHERE id = $1", [businessId]);
@@ -140,6 +199,7 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
   const service = serviceRes.rows[0];
   if (!service) return [];
 
+  // Excepciones (días cerrados o bloqueos parciales)
   const exceptionsRes = await pool.query(
     "SELECT * FROM availability_exception WHERE business_id = $1 AND date = $2",
     [businessId, date]
@@ -147,6 +207,7 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
   const exceptions = exceptionsRes.rows;
   if (exceptions.some((e: any) => e.closed_all_day)) return [];
 
+  // Ventanas de horario del día de la semana
   const dow = dayOfWeek(date);
   const windowsRes = await pool.query(
     "SELECT * FROM availability WHERE business_id = $1 AND day_of_week = $2 AND active = 1",
@@ -155,6 +216,7 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
   const windows = windowsRes.rows;
   if (windows.length === 0) return [];
 
+  // Citas ya reservadas y activas
   const busyRes = await pool.query(
     `SELECT start_time, end_time FROM appointment WHERE business_id = $1 AND date = $2 AND status != 'CANCELLED'`,
     [businessId, date]
@@ -176,6 +238,7 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
     const windowStart = timeToMinutes(w.start_time);
     const windowEnd = timeToMinutes(w.end_time);
     for (let start = windowStart; start + duration <= windowEnd; start += STEP) {
+      // Filtrar horarios que ya pasaron hoy
       if (isToday && start <= currentMinutes) {
         continue;
       }
@@ -188,6 +251,13 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
   return slots;
 }
 
+// ============================================================================
+// SECCIÓN 4: MOTOR DE CONVERSACIÓN Y MÁQUINA DE ESTADOS DE WHATSAPP
+// ============================================================================
+
+/**
+ * Procesa cada mensaje entrante de WhatsApp y avanza el flujo de reserva.
+ */
 export async function handleIncomingMessage(sock: WASocket, from: string, text: string) {
   const business = await getBusiness();
   if (!business) return;
@@ -204,12 +274,18 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     await sock.sendMessage(from, { text: msg });
   }
 
+  // --------------------------------------------------------------------------
+  // COMANDOS GLOBALES DE REINICIO
+  // --------------------------------------------------------------------------
   if (trimmed === "cancelar" || trimmed === "reiniciar") {
     await updateConversation(conversation.id, "START", {});
     await reply("Listo, reiniciamos. Escribí 'hola' cuando quieras reservar un turno.");
     return;
   }
 
+  // --------------------------------------------------------------------------
+  // ESTADO: START (Saludo y Solicitud de Nombre o Menú de Servicios)
+  // --------------------------------------------------------------------------
   if (state === "START") {
     if (!customer.name) {
       await updateConversation(conversation.id, "ASK_NAME", {});
@@ -235,6 +311,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     return;
   }
 
+  // --------------------------------------------------------------------------
+  // ESTADO: ASK_NAME (Registro del Nombre del Cliente)
+  // --------------------------------------------------------------------------
   if (state === "ASK_NAME") {
     const name = text.trim();
     if (!name) {
@@ -258,6 +337,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     return;
   }
 
+  // --------------------------------------------------------------------------
+  // ESTADO: SELECT_SERVICE (Elección de Servicio y Presentación de Días)
+  // --------------------------------------------------------------------------
   if (state === "SELECT_SERVICE") {
     const choice = parseInt(trimmed, 10);
     const serviceIds = data.serviceIds || [];
@@ -292,6 +374,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     return;
   }
 
+  // --------------------------------------------------------------------------
+  // ESTADO: SELECT_DATE (Elección de Día y Presentación de Horarios Libres)
+  // --------------------------------------------------------------------------
   if (state === "SELECT_DATE") {
     const choice = parseInt(trimmed, 10);
     const dates = data.dates || [];
@@ -319,6 +404,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     return;
   }
 
+  // --------------------------------------------------------------------------
+  // ESTADO: SELECT_TIME (Elección de Horario y Resumen de Confirmación)
+  // --------------------------------------------------------------------------
   if (state === "SELECT_TIME") {
     const choice = parseInt(trimmed, 10);
     const slots = data.slots || [];
@@ -339,6 +427,9 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     return;
   }
 
+  // --------------------------------------------------------------------------
+  // ESTADO: CONFIRMATION (Guardado en Base de Datos, Notificación y Cierre)
+  // --------------------------------------------------------------------------
   if (state === "CONFIRMATION") {
     if (trimmed === "1" || trimmed === "si" || trimmed === "sí") {
       const client = await pool.connect();
@@ -353,6 +444,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
         const startMin = timeToMinutes(data.start_time);
         const endTime = minutesToTime(startMin + duration);
 
+        // Comprobar conflicto de concurrencia
         const conflictRes = await client.query(
           `SELECT id FROM appointment WHERE business_id = $1 AND date = $2 AND status != 'CANCELLED'
            AND start_time < $3 AND end_time > $4`,
@@ -368,6 +460,8 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
 
         const isApproval = business.booking_mode === "approval";
         const id = randomUUID();
+
+        // Insertar la nueva cita
         await client.query(
           `INSERT INTO appointment (id, business_id, customer_id, service_id, date, start_time, end_time, status, created_via)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'whatsapp')`,
@@ -400,12 +494,14 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           await reply(`¡Listo! Tu reserva quedó confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos 🙌`);
         }
 
+        // Notificación push directa al teléfono del barbero por Firebase FCM
         await sendBarberPushNotification(
           business.expo_push_token,
           "📅 Nueva cita",
           `${customer.name} — ${serviceName} — ${fechaLegible} ${data.start_time}`
         );
 
+        // Envío complementario por WhatsApp al teléfono personal del barbero (si está cargado)
         if (business.phone) {
           const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {

@@ -2,21 +2,42 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
 
+// ============================================================================
+// FUNCIONES AUXILIARES DE TIEMPO Y FECHAS
+// ============================================================================
+
+/**
+ * Convierte "HH:mm" a minutos totales transcurridos desde las 00:00.
+ */
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
+
+/**
+ * Convierte una cantidad de minutos a formato legible "HH:mm".
+ */
 function minutesToTime(mins: number): string {
   const h = Math.floor(mins / 60).toString().padStart(2, "0");
   const m = (mins % 60).toString().padStart(2, "0");
   return `${h}:${m}`;
 }
+
+/**
+ * Obtiene el día de la semana (0 = Domingo, 1 = Lunes, ..., 6 = Sábado).
+ */
 function dayOfWeek(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): { currentDate: string; currentMinutes: number } {
+/**
+ * Devuelve la fecha actual y los minutos de hoy en la zona horaria indicada.
+ */
+function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): {
+  currentDate: string;
+  currentMinutes: number;
+} {
   try {
     const now = new Date();
     const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -46,12 +67,22 @@ function getCurrentDateAndMinutes(timezone: string = "America/Montevideo"): { cu
   }
 }
 
+// ============================================================================
+// DEFINICIÓN DE RUTAS DE CITAS Y CONFIGURACIÓN DEL NEGOCIO
+// ============================================================================
+
 export async function appointmentRoutes(app: FastifyInstance) {
+  /**
+   * Obtiene el ID del negocio registrado en la base de datos.
+   */
   async function getBusinessId(): Promise<string | null> {
     const { rows } = await pool.query("SELECT id FROM business LIMIT 1");
     return rows[0]?.id ?? null;
   }
 
+  // --------------------------------------------------------------------------
+  // GET /appointments -> Listar agenda del día
+  // --------------------------------------------------------------------------
   app.get("/", async (request) => {
     const { date } = request.query as { date?: string };
     const day = date ?? new Date().toISOString().slice(0, 10);
@@ -67,6 +98,9 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return rows;
   });
 
+  // --------------------------------------------------------------------------
+  // GET /appointments/available-slots -> Obtener horarios libres disponibles
+  // --------------------------------------------------------------------------
   app.get("/available-slots", async (request, reply) => {
     const { date, service_id } = request.query as { date?: string; service_id?: string };
     if (!date || !service_id) {
@@ -82,6 +116,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
     const { currentDate, currentMinutes } = getCurrentDateAndMinutes(timezone);
 
+    // Descartar fechas anteriores a hoy
     if (date < currentDate) {
       return { date, service_id, slots: [] };
     }
@@ -90,6 +125,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const service = serviceRes.rows[0];
     if (!service) return reply.status(404).send({ error: "Servicio no encontrado o inactivo" });
 
+    // Excepciones de disponibilidad (vacaciones, feriados, etc.)
     const exceptionsRes = await pool.query(
       "SELECT * FROM availability_exception WHERE business_id = $1 AND date = $2",
       [businessId, date]
@@ -104,15 +140,16 @@ export async function appointmentRoutes(app: FastifyInstance) {
       return { date, service_id, slots: [] };
     }
 
+    // Horarios de apertura semanales
     const dow = dayOfWeek(date);
     const windowsRes = await pool.query(
       "SELECT * FROM availability WHERE business_id = $1 AND day_of_week = $2 AND active = 1",
       [businessId, dow]
     );
     const windows = windowsRes.rows as { start_time: string; end_time: string }[];
-
     if (windows.length === 0) return { date, service_id, slots: [] };
 
+    // Turnos ocupados ya reservados
     const busyRes = await pool.query(
       `SELECT start_time, end_time FROM appointment
        WHERE business_id = $1 AND date = $2 AND status != 'CANCELLED'`,
@@ -136,6 +173,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
       const windowEnd = timeToMinutes(w.end_time);
 
       for (let start = windowStart; start + duration <= windowEnd; start += STEP) {
+        // Filtrar horarios que ya pasaron hoy
         if (isToday && start <= currentMinutes) {
           continue;
         }
@@ -149,6 +187,9 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return { date, service_id, duration_minutes: duration, slots };
   });
 
+  // --------------------------------------------------------------------------
+  // POST /appointments -> Crear reserva manual (desde la app)
+  // --------------------------------------------------------------------------
   app.post("/", async (request, reply) => {
     const body = request.body as {
       customer_id?: string;
@@ -184,6 +225,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const endMin = startMin + service.duration_minutes;
     const endTime = minutesToTime(endMin);
 
+    // Transacción segura para evitar solapamientos concurrentes
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -232,6 +274,9 @@ export async function appointmentRoutes(app: FastifyInstance) {
     }
   });
 
+  // --------------------------------------------------------------------------
+  // PATCH /appointments/:id/cancel -> Cancelar una cita existente
+  // --------------------------------------------------------------------------
   app.patch("/:id/cancel", async (request, reply) => {
     const { id } = request.params as { id: string };
     const existingRes = await pool.query("SELECT * FROM appointment WHERE id = $1", [id]);
@@ -242,6 +287,9 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return updatedRes.rows[0];
   });
 
+  // --------------------------------------------------------------------------
+  // POST /appointments/:id/respond -> Aceptar o rechazar cita en modo aprobación
+  // --------------------------------------------------------------------------
   app.post("/:id/respond", async (request, reply) => {
     const { id } = request.params as { id: string };
     const { decision } = request.body as { decision: "accept" | "reject" };
@@ -255,6 +303,9 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return { id, status: newStatus };
   });
 
+  // --------------------------------------------------------------------------
+  // PUT /appointments/business -> Actualizar datos generales del negocio
+  // --------------------------------------------------------------------------
   app.put("/business", async (request, reply) => {
     const body = request.body as {
       name?: string;
@@ -283,10 +334,14 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return updatedRes.rows[0];
   });
 
+  // --------------------------------------------------------------------------
+  // PATCH /appointments/business/settings -> Ajustes de turnos, modo y notificaciones
+  // --------------------------------------------------------------------------
   app.patch("/business/settings", async (request, reply) => {
-    const { slot_step_minutes, booking_mode } = request.body as {
+    const { slot_step_minutes, booking_mode, notify_upcoming_appointments } = request.body as {
       slot_step_minutes?: number;
       booking_mode?: "auto" | "approval";
+      notify_upcoming_appointments?: boolean | number;
     };
     const businessId = await getBusinessId();
     if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
@@ -303,10 +358,19 @@ export async function appointmentRoutes(app: FastifyInstance) {
       await pool.query("UPDATE business SET booking_mode = $1 WHERE id = $2", [booking_mode, businessId]);
     }
 
+    // Toggle de activación para recordatorio 5 min antes
+    if (notify_upcoming_appointments !== undefined) {
+      const val = notify_upcoming_appointments === true || notify_upcoming_appointments === 1 ? 1 : 0;
+      await pool.query("UPDATE business SET notify_upcoming_appointments = $1 WHERE id = $2", [val, businessId]);
+    }
+
     const updatedRes = await pool.query("SELECT * FROM business WHERE id = $1", [businessId]);
     return updatedRes.rows[0];
   });
 
+  // --------------------------------------------------------------------------
+  // GET /appointments/business -> Consultar información del negocio y servicios
+  // --------------------------------------------------------------------------
   app.get("/business", async () => {
     const businessRes = await pool.query("SELECT * FROM business LIMIT 1");
     const business = businessRes.rows[0];
@@ -316,6 +380,9 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return { business, services: servicesRes.rows };
   });
 
+  // --------------------------------------------------------------------------
+  // POST /appointments/business/push-token -> Registrar token FCM de notificaciones
+  // --------------------------------------------------------------------------
   app.post("/business/push-token", async (request, reply) => {
     const { token } = request.body as { token?: string };
     if (!token) return reply.status(400).send({ error: "token es obligatorio" });
