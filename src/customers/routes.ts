@@ -55,11 +55,20 @@ export async function customerRoutes(app: FastifyInstance) {
     const businessId = await getBusinessId();
     if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
 
-    const existingRes = await pool.query(
-      "SELECT id FROM customer WHERE business_id = $1 AND phone = $2",
+        const existingRes = await pool.query(
+      "SELECT id, active FROM customer WHERE business_id = $1 AND phone = $2",
       [businessId, body.phone]
     );
     if (existingRes.rows[0]) {
+      if (existingRes.rows[0].active === 0) {
+        // Si el cliente estaba eliminado, lo reactivamos con los datos ingresados
+        await pool.query(
+          "UPDATE customer SET active = 1, name = COALESCE($1, name), notes = COALESCE($2, notes) WHERE id = $3",
+          [body.name ?? null, body.notes ?? null, existingRes.rows[0].id]
+        );
+        const { rows } = await pool.query("SELECT * FROM customer WHERE id = $1", [existingRes.rows[0].id]);
+        return reply.status(200).send(rows[0]);
+      }
       return reply.status(409).send({ error: "Ya existe un cliente con ese teléfono" });
     }
 

@@ -216,6 +216,12 @@ export async function appointmentRoutes(app: FastifyInstance) {
         ]
       );
 
+      // Reactivar automáticamente al cliente si estaba marcado como inactivo/eliminado
+      await client.query(
+        "UPDATE customer SET active = 1 WHERE id = $1 AND active = 0",
+        [body.customer_id]
+      );
+
       await client.query("COMMIT");
       return { id, date: body.date, start_time: body.start_time, end_time: endTime, status: "CONFIRMED" };
     } catch (err) {
