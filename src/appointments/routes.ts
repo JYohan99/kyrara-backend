@@ -1,3 +1,4 @@
+import { sendPushNotification } from "../notifications/firebase.js";
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
@@ -392,5 +393,32 @@ export async function appointmentRoutes(app: FastifyInstance) {
 
     await pool.query("UPDATE business SET expo_push_token = $1 WHERE id = $2", [token, businessId]);
     return { status: "ok", token };
+  });
+
+  // --------------------------------------------------------------------------
+  // POST /appointments/business/test-push -> Enviar alerta de prueba directa al barbero
+  // --------------------------------------------------------------------------
+  app.post("/business/test-push", async (request, reply) => {
+    const businessId = await getBusinessId();
+    if (!businessId) return reply.status(400).send({ error: "No hay negocio cargado" });
+
+    const businessRes = await pool.query("SELECT expo_push_token FROM business WHERE id = $1", [businessId]);
+    const token = businessRes.rows[0]?.expo_push_token;
+
+    if (!token) {
+      return reply.status(400).send({ error: "No hay ningún teléfono vinculado todavía. Presiona 'Vincular Teléfono' primero." });
+    }
+
+    try {
+      const result = await sendPushNotification(
+        token,
+        "💈 Kyrara Barber",
+        "¡Notificación de prueba recibida con éxito en tu teléfono!",
+        { type: "TEST" }
+      );
+      return { success: true, message: "Notificación enviada", result };
+    } catch (err: any) {
+      return reply.status(500).send({ error: err?.message || "Error enviando notificación push" });
+    }
   });
 }
