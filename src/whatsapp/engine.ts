@@ -252,7 +252,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     const list = services.map((s: any, i: number) => `${i + 1}. ${s.name} - ${s.duration_minutes} min`).join("\n");
 
     await updateConversation(conversation.id, "SELECT_SERVICE", { serviceIds: services.map((s: any) => s.id) });
-    await reply(`¡Hola ${customer.name}! ¿Qué servicio querés reservar?\n\n${list}\n\nEscribí el número de la opción.`);
+    await reply(`¡Kyrara: Hola ${customer.name}! ¿Qué servicio querés reservar?\n\n${list}\n\nEscribí el número de la opción.`);
     return;
   }
 
