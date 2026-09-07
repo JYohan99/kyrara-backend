@@ -234,7 +234,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
   if (state === "START") {
     if (!customer.name) {
       await updateConversation(conversation.id, "ASK_NAME", {});
-      await reply(`Hola 👋 Soy el asistente de ${business.name || "la barbería"}. ¿Cómo te llamás?`);
+      await reply(`Hola 👋 Soy Kyrara el asistente de ${business.name || "la barbería"}. ¿Cómo te llamás?`);
       return;
     }
 
