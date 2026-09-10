@@ -147,6 +147,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
       slot_step_minutes?: number;
       booking_mode?: "auto" | "approval";
       notify_upcoming_appointments?: boolean | number;
+      notify_whatsapp?: boolean | number;
     };
     try {
       return await updateBusinessSettings(body);
@@ -238,19 +239,28 @@ export async function appointmentRoutes(app: FastifyInstance) {
       }
     }
 
-    // 2. Probar WhatsApp al barbero (si hay teléfono)
-    if (phone) {
+    // 2. Probar WhatsApp al barbero (si hay teléfono y está activo)
+    const isWhatsAppActive =
+      business.notify_whatsapp !== 0 && business.notify_whatsapp !== false;
+
+    if (phone && isWhatsAppActive) {
       whatsappSent = await sendBarberWhatsAppAlert(
         phone,
         "💈 *Kyrara Alertas*\n\n¡Esta es una notificación de prueba enviada con éxito a tu WhatsApp!"
       );
     }
 
+    const whatsappStatus = !isWhatsAppActive
+      ? "⏸️ Desactivado en ajustes"
+      : whatsappSent
+      ? "✅ Enviado"
+      : "⚠️ Desconectado o sin número";
+
     return {
       success: webPushSent || whatsappSent,
       webPushSent,
       whatsappSent,
-      message: `Prueba completada: Web Push ${webPushSent ? "✅ Enviado" : "⚠️ No configurado"}, WhatsApp ${whatsappSent ? "✅ Enviado" : "⚠️ Desconectado o sin número"}`,
+      message: `Prueba completada: Web Push ${webPushSent ? "✅ Enviado" : "⚠️ No configurado"}, WhatsApp ${whatsappStatus}`,
     };
   });
 }

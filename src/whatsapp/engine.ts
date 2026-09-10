@@ -448,8 +448,11 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           `${customer.name} — ${serviceName} — ${fechaLegible} ${data.start_time}`
         );
 
-        // 2. Envío complementario por WhatsApp al teléfono personal del barbero (si está cargado)
-        if (business.phone) {
+        // 2. Envío complementario por WhatsApp al teléfono personal del barbero (si está activo y cargado)
+        const isWhatsAppAlertActive =
+          business.notify_whatsapp !== 0 && business.notify_whatsapp !== false;
+
+        if (business.phone && isWhatsAppAlertActive) {
           const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {
             text: `💈 *Nueva cita agendada*\n\n👤 Cliente: ${customer.name}\n✂️ Servicio: ${serviceName}\n📅 Fecha: ${fechaLegible}\n⏰ Hora: ${data.start_time}\n\n¡Revisá Kyrara para gestionarla!`,

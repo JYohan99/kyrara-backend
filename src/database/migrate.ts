@@ -101,6 +101,7 @@ async function migrate() {
     ALTER TABLE business ADD COLUMN IF NOT EXISTS expo_push_token TEXT;
     ALTER TABLE business ADD COLUMN IF NOT EXISTS web_push_subscription TEXT;
     ALTER TABLE business ADD COLUMN IF NOT EXISTS notify_upcoming_appointments INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE business ADD COLUMN IF NOT EXISTS notify_whatsapp INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE appointment ADD COLUMN IF NOT EXISTS notified_upcoming INTEGER NOT NULL DEFAULT 0;
 
   `);

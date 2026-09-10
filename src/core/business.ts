@@ -55,6 +55,7 @@ export async function updateBusinessSettings(data: {
   slot_step_minutes?: number;
   booking_mode?: "auto" | "approval";
   notify_upcoming_appointments?: number | boolean;
+  notify_whatsapp?: number | boolean;
 }): Promise<any> {
   const businessId = await getBusinessId();
   if (!businessId) throw new Error("No hay negocio registrado");
@@ -87,6 +88,18 @@ export async function updateBusinessSettings(data: {
         : 0;
     await pool.query(
       "UPDATE business SET notify_upcoming_appointments = $1 WHERE id = $2",
+      [val, businessId]
+    );
+  }
+
+  if (data.notify_whatsapp !== undefined) {
+    const val =
+      data.notify_whatsapp === true ||
+      data.notify_whatsapp === 1
+        ? 1
+        : 0;
+    await pool.query(
+      "UPDATE business SET notify_whatsapp = $1 WHERE id = $2",
       [val, businessId]
     );
   }

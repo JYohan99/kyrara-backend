@@ -64,7 +64,7 @@ async function checkUpcomingAppointments() {
   try {
     // 1. Obtener la configuración del negocio
     const businessRes = await pool.query(
-      "SELECT id, timezone, web_push_subscription, phone, notify_upcoming_appointments FROM business LIMIT 1"
+      "SELECT id, timezone, web_push_subscription, phone, notify_upcoming_appointments, notify_whatsapp FROM business LIMIT 1"
     );
     const business = businessRes.rows[0];
     if (!business) return;
@@ -112,8 +112,11 @@ async function checkUpcomingAppointments() {
           });
         }
 
-        // 2. Enviar WhatsApp directo al barbero si tiene teléfono cargado
-        if (business.phone) {
+        // 2. Enviar WhatsApp directo al barbero si tiene teléfono cargado y está activo
+        const isWhatsAppAlertActive =
+          business.notify_whatsapp !== 0 && business.notify_whatsapp !== false;
+
+        if (business.phone && isWhatsAppAlertActive) {
           await sendBarberWhatsAppAlert(
             business.phone,
             `⏰ *Próximo turno en 5 min*\n\n👤 ${cliente}\n✂️ ${servicio}\n🕒 Hora: ${app.start_time}`
