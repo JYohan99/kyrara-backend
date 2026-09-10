@@ -1,4 +1,4 @@
-import { sendPushNotification } from "../notifications/firebase.js";
+import { sendWebPushNotification } from "../notifications/webpush.js";
 import type { WASocket } from "baileys";
 import { randomUUID } from "node:crypto";
 import { pool } from "../database/connection.js";
@@ -117,10 +117,12 @@ async function updateConversation(id: string, state: string, data: any) {
 }
 
 /**
- * Envía una notificación push directa al teléfono del barbero vía Firebase FCM.
+ * Envía una notificación Web Push directa al dispositivo del barbero (iPhone / PC / Android).
  */
-async function sendBarberPushNotification(expoPushToken: string | null, title: string, body: string) {
-  await sendPushNotification(expoPushToken, title, body);
+async function sendBarberPushNotification(webPushSubscription: string | null | undefined, title: string, body: string) {
+  if (webPushSubscription) {
+    await sendWebPushNotification(webPushSubscription, title, body);
+  }
 }
 
 // ============================================================================
@@ -439,18 +441,18 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           await reply(`¡Listo! Tu reserva quedó confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos 🙌`);
         }
 
-        // Notificación push directa al teléfono del barbero por Firebase FCM
+        // 1. Notificación Web Push directa al dispositivo del barbero (iPhone / PC / Android)
         await sendBarberPushNotification(
-          business.expo_push_token,
-          "📅 Nueva cita",
+          business.web_push_subscription,
+          "💈 Nueva cita agendada",
           `${customer.name} — ${serviceName} — ${fechaLegible} ${data.start_time}`
         );
 
-        // Envío complementario por WhatsApp al teléfono personal del barbero (si está cargado)
+        // 2. Envío complementario por WhatsApp al teléfono personal del barbero (si está cargado)
         if (business.phone) {
           const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {
-            text: `📅 Nueva cita\nCliente: ${customer.name}\nServicio: ${serviceName}\nFecha: ${fechaLegible}\nHora: ${data.start_time}`,
+            text: `💈 *Nueva cita agendada*\n\n👤 Cliente: ${customer.name}\n✂️ Servicio: ${serviceName}\n📅 Fecha: ${fechaLegible}\n⏰ Hora: ${data.start_time}\n\n¡Revisá Kyrara para gestionarla!`,
           });
         }
       } catch (err) {

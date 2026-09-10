@@ -264,3 +264,32 @@ export async function startWhatsApp() {
 
   return sock;
 }
+
+/**
+ * Retorna la instancia activa del socket de WhatsApp si está conectado.
+ */
+export function getWhatsAppSocket(): WASocket | null {
+  return currentSock;
+}
+
+/**
+ * Envía un mensaje directo al número personal de WhatsApp del barbero.
+ */
+export async function sendBarberWhatsAppAlert(phone: string | null | undefined, text: string): Promise<boolean> {
+  if (!phone || !currentSock || connectionStatus !== "open") {
+    return false;
+  }
+
+  try {
+    const cleanNumber = phone.replace(/[^0-9]/g, "");
+    if (!cleanNumber) return false;
+
+    const barberJid = `${cleanNumber}@s.whatsapp.net`;
+    await currentSock.sendMessage(barberJid, { text });
+    console.log(`[WhatsApp Alert] Notificación enviada al barbero (${barberJid})`);
+    return true;
+  } catch (err) {
+    console.error("[WhatsApp Alert] Error enviando alerta al barbero:", err);
+    return false;
+  }
+}

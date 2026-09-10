@@ -1,5 +1,6 @@
 import { pool } from "../database/connection.js";
-import { sendPushNotification } from "./firebase.js";
+import { sendWebPushNotification } from "./webpush.js";
+import { sendBarberWhatsAppAlert } from "../whatsapp/connection.js";
 
 // ============================================================================
 // UTILIDADES DE TIEMPO Y ZONA HORARIA
@@ -63,13 +64,13 @@ async function checkUpcomingAppointments() {
   try {
     // 1. Obtener la configuración del negocio
     const businessRes = await pool.query(
-      "SELECT id, timezone, expo_push_token, notify_upcoming_appointments FROM business LIMIT 1"
+      "SELECT id, timezone, web_push_subscription, phone, notify_upcoming_appointments FROM business LIMIT 1"
     );
     const business = businessRes.rows[0];
     if (!business) return;
 
-    // Si la opción de aviso 5 min antes está desactivada o no hay token registrado, omitir
-    if (business.notify_upcoming_appointments === 0 || !business.expo_push_token) {
+    // Si la opción de aviso 5 min antes está desactivada o no hay ningún canal configurado, omitir
+    if (business.notify_upcoming_appointments === 0 || (!business.web_push_subscription && !business.phone)) {
       return;
     }
 
@@ -103,11 +104,21 @@ async function checkUpcomingAppointments() {
 
         console.log(`[Scheduler] Enviando recordatorio 5 min para cita ${app.id} (${body})`);
 
-        // Enviar notificación push directa al barbero
-        await sendPushNotification(business.expo_push_token, title, body, {
-          appointmentId: app.id,
-          type: "UPCOMING_REMINDER",
-        });
+        // 1. Enviar Web Push al iPhone / navegador si está suscrito
+        if (business.web_push_subscription) {
+          await sendWebPushNotification(business.web_push_subscription, title, body, {
+            appointmentId: app.id,
+            type: "UPCOMING_REMINDER",
+          });
+        }
+
+        // 2. Enviar WhatsApp directo al barbero si tiene teléfono cargado
+        if (business.phone) {
+          await sendBarberWhatsAppAlert(
+            business.phone,
+            `⏰ *Próximo turno en 5 min*\n\n👤 ${cliente}\n✂️ ${servicio}\n🕒 Hora: ${app.start_time}`
+          );
+        }
 
         // Marcar la cita como ya notificada para no duplicar avisos
         await pool.query(

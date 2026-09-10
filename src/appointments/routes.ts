@@ -2,10 +2,15 @@ import type { FastifyInstance } from "fastify";
 import {
   getBusinessProfile,
   setBusinessPushToken,
+  setBusinessWebPushSubscription,
   updateBusinessProfile,
   updateBusinessSettings,
 } from "../core/business.js";
-import { sendPushNotification } from "../notifications/firebase.js";
+import {
+  getVapidPublicKey,
+  sendWebPushNotification,
+} from "../notifications/webpush.js";
+import { sendBarberWhatsAppAlert } from "../whatsapp/connection.js";
 import { listServices } from "../services/service.js";
 import { CreateAppointmentInput } from "./models.js";
 import {
@@ -162,7 +167,31 @@ export async function appointmentRoutes(app: FastifyInstance) {
   });
 
   // --------------------------------------------------------------------------
-  // POST /appointments/business/push-token -> Registrar token FCM de notificaciones
+  // GET /appointments/business/vapid-public-key -> Clave pública para suscripción Web Push
+  // --------------------------------------------------------------------------
+  app.get("/business/vapid-public-key", async () => {
+    return { publicKey: getVapidPublicKey() };
+  });
+
+  // --------------------------------------------------------------------------
+  // POST /appointments/business/web-push-subscription -> Guardar suscripción del navegador
+  // --------------------------------------------------------------------------
+  app.post("/business/web-push-subscription", async (request, reply) => {
+    const { subscription } = request.body as { subscription?: any };
+    if (!subscription) {
+      return reply.status(400).send({ error: "subscription es obligatorio" });
+    }
+
+    try {
+      await setBusinessWebPushSubscription(subscription);
+      return { status: "ok", message: "Suscripción Web Push guardada correctamente" };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // POST /appointments/business/push-token -> Mantener compatibilidad previa
   // --------------------------------------------------------------------------
   app.post("/business/push-token", async (request, reply) => {
     const { token } = request.body as { token?: string };
@@ -177,31 +206,51 @@ export async function appointmentRoutes(app: FastifyInstance) {
   });
 
   // --------------------------------------------------------------------------
-  // POST /appointments/business/test-push -> Enviar alerta de prueba directa al barbero
+  // POST /appointments/business/test-push -> Disparar prueba dual (Web Push + WhatsApp)
   // --------------------------------------------------------------------------
   app.post("/business/test-push", async (request, reply) => {
     const business = await getBusinessProfile();
-    const token = business?.expo_push_token;
+    const webSub = business?.web_push_subscription;
+    const phone = business?.phone;
 
-    if (!token) {
+    if (!webSub && !phone) {
       return reply.status(400).send({
         error:
-          "No hay ningún teléfono vinculado todavía. Presiona 'Vincular Teléfono' primero.",
+          "No hay navegador suscrito a Web Push ni teléfono cargado en el perfil para WhatsApp.",
       });
     }
 
-    try {
-      const result = await sendPushNotification(
-        token,
-        "💈 Kyrara Barber",
-        "¡Notificación de prueba recibida con éxito en tu teléfono!",
-        { type: "TEST" }
-      );
-      return { success: true, message: "Notificación enviada", result };
-    } catch (err: any) {
-      return reply.status(500).send({
-        error: err?.message || "Error enviando notificación push",
-      });
+    let webPushSent = false;
+    let whatsappSent = false;
+
+    // 1. Probar Web Push (si está registrado)
+    if (webSub) {
+      try {
+        const res = await sendWebPushNotification(
+          webSub,
+          "💈 Kyrara Barber",
+          "¡Alerta de prueba Web Push recibida en tu pantalla!",
+          { type: "TEST" }
+        );
+        webPushSent = !!res;
+      } catch (err) {
+        console.error("[Test] Error enviando web push:", err);
+      }
     }
+
+    // 2. Probar WhatsApp al barbero (si hay teléfono)
+    if (phone) {
+      whatsappSent = await sendBarberWhatsAppAlert(
+        phone,
+        "💈 *Kyrara Alertas*\n\n¡Esta es una notificación de prueba enviada con éxito a tu WhatsApp!"
+      );
+    }
+
+    return {
+      success: webPushSent || whatsappSent,
+      webPushSent,
+      whatsappSent,
+      message: `Prueba completada: Web Push ${webPushSent ? "✅ Enviado" : "⚠️ No configurado"}, WhatsApp ${whatsappSent ? "✅ Enviado" : "⚠️ Desconectado o sin número"}`,
+    };
   });
 }

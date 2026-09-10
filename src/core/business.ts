@@ -95,7 +95,7 @@ export async function updateBusinessSettings(data: {
 }
 
 /**
- * Registra el token de notificaciones FCM para el negocio.
+ * Registra el token de notificaciones FCM para el negocio (legacy).
  */
 export async function setBusinessPushToken(token: string): Promise<void> {
   const businessId = await getBusinessId();
@@ -105,3 +105,17 @@ export async function setBusinessPushToken(token: string): Promise<void> {
     businessId,
   ]);
 }
+
+/**
+ * Registra o actualiza la suscripción Web Push del dispositivo del barbero.
+ */
+export async function setBusinessWebPushSubscription(subscription: any): Promise<void> {
+  const businessId = await getBusinessId();
+  if (!businessId) throw new Error("No hay negocio registrado");
+  const value = typeof subscription === "string" ? subscription : JSON.stringify(subscription);
+  await pool.query("UPDATE business SET web_push_subscription = $1 WHERE id = $2", [
+    value,
+    businessId,
+  ]);
+}
+
