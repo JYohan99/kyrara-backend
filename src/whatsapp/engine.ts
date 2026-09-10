@@ -441,19 +441,22 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
           await reply(`¡Listo! Tu reserva quedó confirmada para el ${fechaLegible} a las ${data.start_time}. Te esperamos 🙌`);
         }
 
+        const freshBusiness = await getBusiness();
+        const currentBiz = freshBusiness || business;
+
         // 1. Notificación Web Push directa al dispositivo del barbero (iPhone / PC / Android)
         await sendBarberPushNotification(
-          business.web_push_subscription,
+          currentBiz.web_push_subscription,
           "💈 Nueva cita agendada",
           `${customer.name} — ${serviceName} — ${fechaLegible} ${data.start_time}`
         );
 
         // 2. Envío complementario por WhatsApp al teléfono personal del barbero (si está activo y cargado)
         const isWhatsAppAlertActive =
-          business.notify_whatsapp !== 0 && business.notify_whatsapp !== false;
+          currentBiz.notify_whatsapp !== 0 && currentBiz.notify_whatsapp !== false;
 
-        if (business.phone && isWhatsAppAlertActive) {
-          const barberJid = business.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+        if (currentBiz.phone && isWhatsAppAlertActive) {
+          const barberJid = currentBiz.phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
           await sock.sendMessage(barberJid, {
             text: `💈 *Nueva cita agendada*\n\n👤 Cliente: ${customer.name}\n✂️ Servicio: ${serviceName}\n📅 Fecha: ${fechaLegible}\n⏰ Hora: ${data.start_time}\n\n¡Revisá Kyrara para gestionarla!`,
           });

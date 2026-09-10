@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { findExceptionsByBusinessId, findBlocksByBusinessId } from "../availability/repository.js";
 import { getBusinessId, getBusinessProfile } from "../core/business.js";
+import { sendWebPushNotification } from "../notifications/webpush.js";
 import {
   dayOfWeek,
   getCurrentDateAndMinutes,
@@ -129,7 +130,7 @@ export async function bookAppointment(input: CreateAppointmentInput): Promise<Ap
   const endTime = minutesToTime(endMin);
 
   const id = randomUUID();
-  return insertAppointmentTransaction({
+  const appointment = await insertAppointmentTransaction({
     id,
     businessId,
     customerId: input.customer_id,
@@ -139,6 +140,22 @@ export async function bookAppointment(input: CreateAppointmentInput): Promise<Ap
     endTime,
     createdVia: input.created_via ?? "manual",
   });
+
+  // Notificar al dispositivo del barbero
+  try {
+    const freshBiz = await getBusinessProfile();
+    if (freshBiz?.web_push_subscription) {
+      await sendWebPushNotification(
+        freshBiz.web_push_subscription,
+        "💈 Nueva cita agendada",
+        `${customer.name || "Cliente"} — ${service.name} — ${input.date} ${input.start_time}`
+      );
+    }
+  } catch (err) {
+    console.error("[Appointments] Error enviando web push de nueva cita:", err);
+  }
+
+  return appointment;
 }
 
 export async function cancelAppointment(id: string): Promise<Appointment> {

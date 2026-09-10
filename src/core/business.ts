@@ -125,9 +125,45 @@ export async function setBusinessPushToken(token: string): Promise<void> {
 export async function setBusinessWebPushSubscription(subscription: any): Promise<void> {
   const businessId = await getBusinessId();
   if (!businessId) throw new Error("No hay negocio registrado");
-  const value = typeof subscription === "string" ? subscription : JSON.stringify(subscription);
+
+  let newSubObj: any;
+  try {
+    newSubObj = typeof subscription === "string" ? JSON.parse(subscription) : subscription;
+  } catch {
+    newSubObj = subscription;
+  }
+
+  if (!newSubObj || !newSubObj.endpoint) {
+    throw new Error("Suscripción inválida: falta endpoint");
+  }
+
+  // Leer suscripciones existentes
+  const { rows } = await pool.query("SELECT web_push_subscription FROM business WHERE id = $1", [businessId]);
+  const currentRaw = rows[0]?.web_push_subscription;
+
+  let list: any[] = [];
+  if (currentRaw) {
+    try {
+      const parsed = JSON.parse(currentRaw);
+      if (Array.isArray(parsed)) {
+        list = parsed;
+      } else if (parsed && parsed.endpoint) {
+        list = [parsed];
+      }
+    } catch {}
+  }
+
+  // Filtrar duplicados por endpoint
+  list = list.filter((s) => s && s.endpoint && s.endpoint !== newSubObj.endpoint);
+  list.push(newSubObj);
+
+  // Mantener los últimos 10 dispositivos vinculados
+  if (list.length > 10) {
+    list = list.slice(-10);
+  }
+
   await pool.query("UPDATE business SET web_push_subscription = $1 WHERE id = $2", [
-    value,
+    JSON.stringify(list),
     businessId,
   ]);
 }
