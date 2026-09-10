@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import { appointmentRoutes } from "./appointments/routes.js";
 import { serviceRoutes } from "./services/routes.js";
 import { availabilityRoutes } from "./availability/routes.js";
@@ -12,6 +13,13 @@ import { startNotificationScheduler } from "./notifications/scheduler.js";
 // INICIALIZACIÓN DEL SERVIDOR FASTIFY
 // ============================================================================
 const app = Fastify({ logger: true });
+
+// Habilitar CORS para permitir peticiones desde navegadores web (localhost y producción)
+await app.register(cors, {
+  origin: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  credentials: true,
+});
 
 // Ruta de comprobación de estado de salud (Health check)
 app.get("/health", async () => ({ status: "ok", service: "kyrara-backend" }));
