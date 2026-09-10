@@ -168,3 +168,34 @@ export async function setBusinessWebPushSubscription(subscription: any): Promise
   ]);
 }
 
+/**
+ * Elimina la suscripción de un dispositivo específico a partir de su endpoint.
+ */
+export async function removeBusinessWebPushSubscription(endpoint: string): Promise<void> {
+  const businessId = await getBusinessId();
+  if (!businessId) throw new Error("No hay negocio registrado");
+  if (!endpoint) return;
+
+  const { rows } = await pool.query("SELECT web_push_subscription FROM business WHERE id = $1", [businessId]);
+  const currentRaw = rows[0]?.web_push_subscription;
+  if (!currentRaw) return;
+
+  let list: any[] = [];
+  try {
+    const parsed = JSON.parse(currentRaw);
+    if (Array.isArray(parsed)) {
+      list = parsed;
+    } else if (parsed && parsed.endpoint) {
+      list = [parsed];
+    }
+  } catch {}
+
+  const filtered = list.filter((s) => s && s.endpoint !== endpoint);
+  const updatedValue = filtered.length > 0 ? JSON.stringify(filtered) : null;
+
+  await pool.query("UPDATE business SET web_push_subscription = $1 WHERE id = $2", [
+    updatedValue,
+    businessId,
+  ]);
+}
+

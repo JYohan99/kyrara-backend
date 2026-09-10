@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
   getBusinessProfile,
+  removeBusinessWebPushSubscription,
   setBusinessPushToken,
   setBusinessWebPushSubscription,
   updateBusinessProfile,
@@ -186,6 +187,23 @@ export async function appointmentRoutes(app: FastifyInstance) {
     try {
       await setBusinessWebPushSubscription(subscription);
       return { status: "ok", message: "Suscripción Web Push guardada correctamente" };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // DELETE /appointments/business/web-push-subscription -> Desuscribir dispositivo
+  // --------------------------------------------------------------------------
+  app.delete("/business/web-push-subscription", async (request, reply) => {
+    const { endpoint } = (request.body || {}) as { endpoint?: string };
+    if (!endpoint) {
+      return reply.status(400).send({ error: "endpoint es obligatorio" });
+    }
+
+    try {
+      await removeBusinessWebPushSubscription(endpoint);
+      return { status: "ok", message: "Suscripción Web Push eliminada correctamente" };
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
     }
