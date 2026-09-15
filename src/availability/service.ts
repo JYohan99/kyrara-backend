@@ -94,13 +94,22 @@ export async function createException(input: CreateExceptionInput): Promise<Avai
   const closed =
     input.closed_all_day === 0 || input.closed_all_day === false ? 0 : 1;
 
+  if (closed === 0) {
+    if (!input.start_time || !input.end_time) {
+      throw new Error("start_time y end_time son obligatorios para cierres parciales");
+    }
+    if (input.start_time >= input.end_time) {
+      throw new Error("start_time debe ser menor a end_time");
+    }
+  }
+
   return insertExceptionRecord({
     id,
     businessId,
     date: input.date,
     closed_all_day: closed,
-    start_time: input.start_time ?? null,
-    end_time: input.end_time ?? null,
+    start_time: closed === 0 ? (input.start_time ?? null) : null,
+    end_time: closed === 0 ? (input.end_time ?? null) : null,
     reason: input.reason ?? null,
   });
 }

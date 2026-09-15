@@ -129,6 +129,24 @@ export async function bookAppointment(input: CreateAppointmentInput): Promise<Ap
   const endMin = startMin + service.duration_minutes;
   const endTime = minutesToTime(endMin);
 
+  // Validar excepciones de cierre del negocio (día completo o parcial)
+  const exceptions = await findExceptionsByBusinessId(businessId);
+  const dayExceptions = exceptions.filter((e) => e.date === input.date);
+  if (dayExceptions.some((e) => e.closed_all_day === 1)) {
+    throw new Error("El negocio se encuentra cerrado en esa fecha.");
+  }
+  const overlapsException = dayExceptions.some((e) => {
+    if (!e.closed_all_day && e.start_time && e.end_time) {
+      const excStart = timeToMinutes(e.start_time);
+      const excEnd = timeToMinutes(e.end_time);
+      return startMin < excEnd && endMin > excStart;
+    }
+    return false;
+  });
+  if (overlapsException) {
+    throw new Error("El horario seleccionado coincide con un horario de cierre del negocio.");
+  }
+
   const id = randomUUID();
   const appointment = await insertAppointmentTransaction({
     id,
