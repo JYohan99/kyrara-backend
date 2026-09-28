@@ -23,12 +23,30 @@ import {
   respondAppointmentApproval,
   updateAppointment,
 } from "./service.js";
+import { getStatisticsData, PeriodType } from "./statistics.js";
 
 // ============================================================================
 // DEFINICIÓN DE RUTAS DE CITAS Y CONFIGURACIÓN DEL NEGOCIO
 // ============================================================================
 
 export async function appointmentRoutes(app: FastifyInstance) {
+  // --------------------------------------------------------------------------
+  // GET /appointments/statistics -> Indicadores, comparaciones y gráficos
+  // --------------------------------------------------------------------------
+  app.get("/statistics", async (request, reply) => {
+    const query = request.query as {
+      period?: PeriodType;
+      startDate?: string;
+      endDate?: string;
+      timezone?: string;
+    };
+    try {
+      return await getStatisticsData(query);
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // --------------------------------------------------------------------------
   // GET /appointments -> Listar agenda del día
   // --------------------------------------------------------------------------
