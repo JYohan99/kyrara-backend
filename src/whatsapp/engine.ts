@@ -142,7 +142,10 @@ async function getAvailableSlots(businessId: string, date: string, serviceId: st
   const businessRes = await pool.query("SELECT slot_step_minutes FROM business WHERE id = $1", [businessId]);
   const STEP = businessRes.rows[0]?.slot_step_minutes ?? 30;
 
-  const serviceRes = await pool.query("SELECT * FROM service WHERE id = $1 AND active = 1", [serviceId]);
+  const serviceRes = await pool.query(
+    "SELECT * FROM service WHERE id = $1 AND active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)",
+    [serviceId]
+  );
   const service = serviceRes.rows[0];
   if (!service) return [];
 
@@ -241,7 +244,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     }
 
     const servicesRes = await pool.query(
-      "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
+      "SELECT * FROM service WHERE business_id = $1 AND active = 1 AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY created_at",
       [business.id]
     );
     const services = servicesRes.rows;
@@ -272,7 +275,7 @@ export async function handleIncomingMessage(sock: WASocket, from: string, text: 
     customer.name = name;
 
     const servicesRes = await pool.query(
-      "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
+      "SELECT * FROM service WHERE business_id = $1 AND active = 1 AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY created_at",
       [business.id]
     );
     const services = servicesRes.rows;

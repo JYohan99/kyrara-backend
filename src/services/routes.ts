@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { CreateServiceInput, UpdateServiceInput } from "./models.js";
 import {
   createService,
+  deleteService,
   listServices,
   toggleService,
   updateService,
@@ -43,6 +44,18 @@ export async function serviceRoutes(app: FastifyInstance) {
       return await toggleService(id);
     } catch (err: any) {
       return reply.status(404).send({ error: err.message });
+    }
+  });
+
+  // DELETE /services/:id -> Eliminar un servicio
+  app.delete("/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      await deleteService(id);
+      return { success: true, id };
+    } catch (err: any) {
+      const status = err.message === "Servicio no encontrado" ? 404 : 400;
+      return reply.status(status).send({ error: err.message });
     }
   });
 }

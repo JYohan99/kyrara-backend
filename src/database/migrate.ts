@@ -103,7 +103,7 @@ async function migrate() {
     ALTER TABLE business ADD COLUMN IF NOT EXISTS notify_upcoming_appointments INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE business ADD COLUMN IF NOT EXISTS notify_whatsapp INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE appointment ADD COLUMN IF NOT EXISTS notified_upcoming INTEGER NOT NULL DEFAULT 0;
-
+    ALTER TABLE service ADD COLUMN IF NOT EXISTS is_deleted INTEGER NOT NULL DEFAULT 0;
   `);
 
   console.log("Migración completa en Postgres (Supabase).");

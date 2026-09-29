@@ -3,7 +3,7 @@ import { Service } from "./models.js";
 
 export async function findServicesByBusinessId(businessId: string): Promise<Service[]> {
   const { rows } = await pool.query(
-    "SELECT * FROM service WHERE business_id = $1 ORDER BY created_at",
+    "SELECT * FROM service WHERE business_id = $1 AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY created_at",
     [businessId]
   );
   return rows;
@@ -11,7 +11,7 @@ export async function findServicesByBusinessId(businessId: string): Promise<Serv
 
 export async function findActiveServicesByBusinessId(businessId: string): Promise<Service[]> {
   const { rows } = await pool.query(
-    "SELECT * FROM service WHERE business_id = $1 AND active = 1 ORDER BY created_at",
+    "SELECT * FROM service WHERE business_id = $1 AND active = 1 AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY created_at",
     [businessId]
   );
   return rows;
@@ -57,4 +57,20 @@ export async function toggleServiceActiveRecord(id: string, newActive: number): 
   const service = await findServiceById(id);
   if (!service) throw new Error("Servicio no encontrado");
   return service;
+}
+
+export async function deleteServiceRecord(id: string): Promise<void> {
+  const check = await pool.query(
+    "SELECT COUNT(*)::int as count FROM appointment WHERE service_id = $1",
+    [id]
+  );
+  const count = check.rows[0]?.count ?? 0;
+  if (count > 0) {
+    await pool.query(
+      "UPDATE service SET is_deleted = 1, active = 0 WHERE id = $1",
+      [id]
+    );
+  } else {
+    await pool.query("DELETE FROM service WHERE id = $1", [id]);
+  }
 }

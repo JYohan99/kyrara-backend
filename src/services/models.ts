@@ -5,6 +5,7 @@ export interface Service {
   duration_minutes: number;
   price: number | null;
   active: number;
+  is_deleted?: number;
   created_at: string;
 }
 
