@@ -64,7 +64,9 @@ async function usePostgresAuthState(): Promise<{
   // para que siempre inicie con un pairingEphemeralKeyPair fresco y limpio.
   if (creds && !creds.registered) {
     console.log("[WhatsApp Auth] Descartando credenciales previas no vinculadas para iniciar sesión limpia.");
-    await removeData("creds");
+    try {
+      await pool.query("DELETE FROM whatsapp_auth");
+    } catch {}
     creds = null;
   }
   if (!creds) {
@@ -130,6 +132,9 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
   } else if (cleanNumber.startsWith("9") && cleanNumber.length === 8) {
     // Si escribió 93927667 (8 dígitos sin el 0 ni el 598): convertir a 59893927667
     cleanNumber = "598" + cleanNumber;
+  } else if (cleanNumber.startsWith("5980") && cleanNumber.length === 12) {
+    // Si por error se pasó el 0 después del código de país (ej. 598099123456 -> 59899123456)
+    cleanNumber = "598" + cleanNumber.slice(4);
   }
 
   if (cleanNumber.length < 10) {
