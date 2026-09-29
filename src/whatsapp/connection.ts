@@ -147,10 +147,9 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
     throw new Error("WhatsApp ya se encuentra vinculado y conectado.");
   }
 
-  // Si el socket está cerrado, no existe o ya tiene un intento previo de pairing activo,
-  // reiniciar para que WhatsApp reciba un par de claves limpias y no se desincronice el handshake.
-  if (!currentSock || connectionStatus === "close" || currentSock.authState?.creds?.pairingCode) {
-    console.log("Socket no listo o con intento previo, reiniciando para pairing limpio...");
+  // Si el socket está cerrado o no existe, reiniciar
+  if (!currentSock || connectionStatus === "close") {
+    console.log("Socket no listo, reiniciando...");
     await restartWhatsApp();
   }
 
@@ -161,7 +160,7 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
     attempts++;
   }
 
-  if (!currentSock || connectionStatus === "close") {
+  if (!currentSock || connectionStatus === "close" || (!latestQR && connectionStatus !== "open")) {
     throw new Error("El socket de WhatsApp no pudo conectar. Presiona de nuevo el botón.");
   }
 
@@ -178,9 +177,13 @@ export async function restartWhatsApp() {
   }
   if (currentSock) {
     try {
+      currentSock.ev.removeAllListeners("connection.update");
+      currentSock.ev.removeAllListeners("creds.update");
+      currentSock.ev.removeAllListeners("messages.upsert");
       currentSock.end(undefined);
     } catch {}
   }
+  currentSock = null;
   latestQR = null;
   connectionStatus = "connecting";
   return startWhatsApp();
@@ -193,7 +196,7 @@ export async function logoutWhatsApp() {
   }
   if (currentSock) {
     try {
-      await currentSock.logout();
+      currentSock.logout().catch(() => {});
     } catch {}
   }
   await pool.query("DELETE FROM whatsapp_auth");
@@ -217,7 +220,7 @@ export async function startWhatsApp() {
   const sock = makeWASocket({
     auth: state,
     logger,
-    browser: Browsers.macOS("Desktop"),
+    browser: Browsers.ubuntu("Chrome"),
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
     keepAliveIntervalMs: 25000,
