@@ -1,6 +1,7 @@
 import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { runMigrations } from "./database/migrate.js";
 import { appointmentRoutes } from "./appointments/routes.js";
 import { serviceRoutes } from "./services/routes.js";
 import { availabilityRoutes } from "./availability/routes.js";
@@ -13,6 +14,13 @@ import { startNotificationScheduler } from "./notifications/scheduler.js";
 // INICIALIZACIÓN DEL SERVIDOR FASTIFY
 // ============================================================================
 const app = Fastify({ logger: true });
+
+// Ejecutar migraciones idempotentes de base de datos
+try {
+  await runMigrations();
+} catch (migErr) {
+  app.log.error(migErr, "Error ejecutando migraciones de base de datos");
+}
 
 // Habilitar CORS para permitir peticiones desde navegadores web (localhost y producción)
 await app.register(cors, {

@@ -1,7 +1,8 @@
 import "dotenv/config";
+import { fileURLToPath } from "node:url";
 import { pool } from "./connection.js";
 
-async function migrate() {
+export async function runMigrations() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS business (
       id TEXT PRIMARY KEY,
@@ -107,10 +108,21 @@ async function migrate() {
   `);
 
   console.log("Migración completa en Postgres (Supabase).");
-  await pool.end();
 }
 
-migrate().catch((err) => {
-  console.error("Error en la migración:", err);
-  process.exit(1);
-});
+const isMainModule =
+  process.argv[1] &&
+  (process.argv[1] === fileURLToPath(import.meta.url) ||
+    process.argv[1].endsWith("migrate.ts") ||
+    process.argv[1].endsWith("migrate.js"));
+
+if (isMainModule) {
+  runMigrations()
+    .then(async () => {
+      await pool.end();
+    })
+    .catch((err) => {
+      console.error("Error en la migración:", err);
+      process.exit(1);
+    });
+}
