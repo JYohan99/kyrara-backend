@@ -28,29 +28,44 @@ async function usePostgresAuthState(): Promise<{
   saveCreds: () => Promise<void>;
 }> {
   async function readData(key: string) {
-    const res = await pool.query("SELECT value FROM whatsapp_auth WHERE key = $1", [key]);
-    if (!res.rows[0]) return null;
-    return JSON.parse(res.rows[0].value, BufferJSON.reviver);
+    try {
+      const res = await pool.query("SELECT value FROM whatsapp_auth WHERE key = $1", [key]);
+      if (!res.rows[0]) return null;
+      return JSON.parse(res.rows[0].value, BufferJSON.reviver);
+    } catch (err: any) {
+      console.error(`[WhatsApp Auth] Error leyendo clave ${key}:`, err.message);
+      return null;
+    }
   }
   async function writeData(key: string, data: any) {
-    const value = JSON.stringify(data, BufferJSON.replacer);
-    await pool.query(
-      `INSERT INTO whatsapp_auth (key, value) VALUES ($1, $2)
-       ON CONFLICT (key) DO UPDATE SET value = $2`,
-      [key, value]
-    );
+    try {
+      const value = JSON.stringify(data, BufferJSON.replacer);
+      await pool.query(
+        `INSERT INTO whatsapp_auth (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = $2`,
+        [key, value]
+      );
+    } catch (err: any) {
+      console.error(`[WhatsApp Auth] Error guardando clave ${key}:`, err.message);
+    }
   }
   async function removeData(key: string) {
-    await pool.query("DELETE FROM whatsapp_auth WHERE key = $1", [key]);
+    try {
+      await pool.query("DELETE FROM whatsapp_auth WHERE key = $1", [key]);
+    } catch (err: any) {
+      console.error(`[WhatsApp Auth] Error eliminando clave ${key}:`, err.message);
+    }
   }
 
   const storedCreds = await readData("creds");
   let creds = storedCreds;
 
-  // Si no está registrado y tenía un intento previo fallido, limpiar credenciales intermedias
-  if (creds && !creds.registered && creds.me) {
-    delete creds.me;
-    delete creds.pairingCode;
+  // Si no está registrado (no completó vinculación), descartar credenciales intermedias
+  // para que siempre inicie con un pairingEphemeralKeyPair fresco y limpio.
+  if (creds && !creds.registered) {
+    console.log("[WhatsApp Auth] Descartando credenciales previas no vinculadas para iniciar sesión limpia.");
+    await removeData("creds");
+    creds = null;
   }
   if (!creds) {
     creds = initAuthCreds();
@@ -123,10 +138,15 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
     );
   }
 
-  // Si el socket está cerrado o no existe, reiniciar
-  if (!currentSock || connectionStatus === "close") {
-    console.log("Socket desconectado, reiniciando antes de pedir pairing code...");
-    await startWhatsApp();
+  if (currentSock?.authState?.creds?.registered) {
+    throw new Error("WhatsApp ya se encuentra vinculado y conectado.");
+  }
+
+  // Si el socket está cerrado, no existe o ya tiene un intento previo de pairing activo,
+  // reiniciar para que WhatsApp reciba un par de claves limpias y no se desincronice el handshake.
+  if (!currentSock || connectionStatus === "close" || currentSock.authState?.creds?.pairingCode) {
+    console.log("Socket no listo o con intento previo, reiniciando para pairing limpio...");
+    await restartWhatsApp();
   }
 
   // Esperar hasta que el socket esté conectado y emitiendo handshake
@@ -138,10 +158,6 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
 
   if (!currentSock || connectionStatus === "close") {
     throw new Error("El socket de WhatsApp no pudo conectar. Presiona de nuevo el botón.");
-  }
-
-  if (currentSock.authState?.creds?.registered) {
-    throw new Error("WhatsApp ya se encuentra vinculado y conectado.");
   }
 
   console.log(`Solicitando código de vinculación para ${cleanNumber}...`);
@@ -196,7 +212,7 @@ export async function startWhatsApp() {
   const sock = makeWASocket({
     auth: state,
     logger,
-    browser: Browsers.ubuntu("Chrome"),
+    browser: Browsers.macOS("Desktop"),
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
     keepAliveIntervalMs: 25000,
@@ -219,11 +235,13 @@ export async function startWhatsApp() {
     if (connection === "close") {
       connectionStatus = "close";
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isLoggedOut =
+        statusCode === DisconnectReason.loggedOut ||
+        statusCode === DisconnectReason.badSession;
 
       console.log(
         `Conexión de WhatsApp cerrada (status: ${statusCode}).`,
-        isLoggedOut ? "Sesión desvinculada." : "Reintentando reconexión en 3 segundos..."
+        isLoggedOut ? "Sesión desvinculada/inválida." : "Reintentando reconexión en 3 segundos..."
       );
 
       latestQR = null;
