@@ -60,14 +60,10 @@ async function usePostgresAuthState(): Promise<{
   const storedCreds = await readData("creds");
   let creds = storedCreds;
 
-  // Si no está registrado (no completó vinculación), descartar credenciales intermedias
-  // para que siempre inicie con un pairingEphemeralKeyPair fresco y limpio.
-  if (creds && !creds.registered) {
-    console.log("[WhatsApp Auth] Descartando credenciales previas no vinculadas para iniciar sesión limpia.");
-    try {
-      await pool.query("DELETE FROM whatsapp_auth");
-    } catch {}
-    creds = null;
+  // Si no está registrado y tenía un intento previo fallido, limpiar credenciales intermedias
+  if (creds && !creds.registered && creds.me) {
+    delete creds.me;
+    delete creds.pairingCode;
   }
   if (!creds) {
     creds = initAuthCreds();
@@ -149,8 +145,8 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
 
   // Si el socket está cerrado o no existe, reiniciar
   if (!currentSock || connectionStatus === "close") {
-    console.log("Socket no listo, reiniciando...");
-    await restartWhatsApp();
+    console.log("Socket desconectado, reiniciando antes de pedir pairing code...");
+    await startWhatsApp();
   }
 
   // Esperar hasta que el socket esté conectado y emitiendo handshake
@@ -160,7 +156,7 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
     attempts++;
   }
 
-  if (!currentSock || connectionStatus === "close" || (!latestQR && connectionStatus !== "open")) {
+  if (!currentSock || connectionStatus === "close") {
     throw new Error("El socket de WhatsApp no pudo conectar. Presiona de nuevo el botón.");
   }
 
