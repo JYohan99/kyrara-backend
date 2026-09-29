@@ -39,6 +39,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
       startDate?: string;
       endDate?: string;
       timezone?: string;
+      month?: string;
     };
     try {
       return await getStatisticsData(query);

@@ -73,6 +73,11 @@ const MONTH_NAMES_ES = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
 
+const MONTH_ABBR_ES = [
+  "ene", "feb", "mar", "abr", "may", "jun",
+  "jul", "ago", "sep", "oct", "nov", "dic"
+];
+
 const DAY_NAMES_ES = [
   "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"
 ];
@@ -105,19 +110,22 @@ function formatPrettyRange(startStr: string, endStr: string): string {
   const [sy, sm, sd] = startStr.split("-").map(Number);
   const [ey, em, ed] = endStr.split("-").map(Number);
 
+  const startAbbr = MONTH_ABBR_ES[sm - 1] || "";
+  const endAbbr = MONTH_ABBR_ES[em - 1] || "";
+
   if (startStr === endStr) {
-    return `${sd} de ${MONTH_NAMES_ES[sm - 1]} de ${sy}`;
+    return `${sd} ${startAbbr} ${sy}`;
   }
 
   if (sy === ey && sm === em) {
-    return `${sd} al ${ed} de ${MONTH_NAMES_ES[sm - 1]} de ${sy}`;
+    return `${sd} - ${ed} ${startAbbr} ${sy}`;
   }
 
   if (sy === ey) {
-    return `${sd} de ${MONTH_NAMES_ES[sm - 1]} – ${ed} de ${MONTH_NAMES_ES[em - 1]} de ${sy}`;
+    return `${sd} ${startAbbr} - ${ed} ${endAbbr} ${sy}`;
   }
 
-  return `${sd} de ${MONTH_NAMES_ES[sm - 1]} (${sy}) – ${ed} de ${MONTH_NAMES_ES[em - 1]} (${ey})`;
+  return `${sd} ${startAbbr} ${sy} - ${ed} ${endAbbr} ${ey}`;
 }
 
 export function computeComparison(
@@ -168,7 +176,8 @@ export function resolvePeriodRanges(
   period: PeriodType,
   todayStr: string,
   customStart?: string,
-  customEnd?: string
+  customEnd?: string,
+  selectedMonth?: string
 ): { current: PeriodRange; previous: PeriodRange } {
   const todayDate = parseDateISO(todayStr);
   const year = todayDate.getUTCFullYear();
@@ -292,32 +301,46 @@ export function resolvePeriodRanges(
     };
   }
 
-  // Default: "month" (Este mes)
-  const firstOfMonth = new Date(Date.UTC(year, month, 1));
-  const lastOfMonth = new Date(Date.UTC(year, month + 1, 0));
+  // Default: "month" (Este mes o mes seleccionado)
+  let targetYear = year;
+  let targetMonth = month; // 0-indexed
+  if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
+    const [y, m] = selectedMonth.split("-").map(Number);
+    targetYear = y;
+    targetMonth = m - 1;
+  }
 
-  const firstOfPrevMonth = new Date(Date.UTC(year, month - 1, 1));
-  const lastOfPrevMonth = new Date(Date.UTC(year, month, 0));
+  const isCurrentMonth = targetYear === year && targetMonth === month;
+  const firstOfMonth = new Date(Date.UTC(targetYear, targetMonth, 1));
+  const lastOfMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0));
+
+  const firstOfPrevMonth = new Date(Date.UTC(targetYear, targetMonth - 1, 1));
+  const lastOfPrevMonth = new Date(Date.UTC(targetYear, targetMonth, 0));
 
   const curStart = formatDateISO(firstOfMonth);
   const curEnd = formatDateISO(lastOfMonth);
   const prevStart = formatDateISO(firstOfPrevMonth);
   const prevEnd = formatDateISO(lastOfPrevMonth);
 
+  const prevMonthIdx = (targetMonth - 1 + 12) % 12;
+  const prevMonthYear = targetMonth === 0 ? targetYear - 1 : targetYear;
+  const prevMonthName = MONTH_NAMES_ES[prevMonthIdx];
+  const curMonthName = MONTH_NAMES_ES[targetMonth];
+
   return {
     current: {
       startDate: curStart,
       endDate: curEnd,
-      label: "Este mes",
+      label: isCurrentMonth ? "Este mes" : `${curMonthName} ${targetYear}`,
       formattedRange: formatPrettyRange(curStart, curEnd),
-      comparisonSuffix: "respecto al mes anterior",
+      comparisonSuffix: `respecto a ${prevMonthName.toLowerCase()}`,
     },
     previous: {
       startDate: prevStart,
       endDate: prevEnd,
-      label: "Mes anterior",
+      label: `${prevMonthName} ${prevMonthYear}`,
       formattedRange: formatPrettyRange(prevStart, prevEnd),
-      comparisonSuffix: "mes anterior",
+      comparisonSuffix: "mes previo",
     },
   };
 }
@@ -327,6 +350,7 @@ export async function getStatisticsData(options: {
   startDate?: string;
   endDate?: string;
   timezone?: string;
+  month?: string;
 }): Promise<StatisticsResponse> {
   const businessId = await getBusinessId();
   if (!businessId) {
@@ -342,7 +366,8 @@ export async function getStatisticsData(options: {
     period,
     todayStr,
     options.startDate,
-    options.endDate
+    options.endDate,
+    options.month
   );
 
   // 1. Obtener todas las citas del período actual con detalles del servicio
