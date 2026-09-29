@@ -60,10 +60,12 @@ async function usePostgresAuthState(): Promise<{
   const storedCreds = await readData("creds");
   let creds = storedCreds;
 
-  // Si no está registrado y tenía un intento previo fallido, limpiar credenciales intermedias
-  if (creds && !creds.registered && creds.me) {
-    delete creds.me;
-    delete creds.pairingCode;
+  // Si tiene datos de cuenta previa pero nunca completó registro (intento fallido o interrumpido),
+  // esa sesión quedó corrupta e irrecuperable según el protocolo de WhatsApp. Limpiar para iniciar fresco.
+  if (creds && !creds.registered && creds.account) {
+    console.log("[WhatsApp Auth] Sesión previa con registro incompleto detectada. Limpiando para iniciar sesión fresca...");
+    await removeData("creds");
+    creds = null;
   }
   if (!creds) {
     creds = initAuthCreds();
@@ -143,8 +145,15 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
     throw new Error("WhatsApp ya se encuentra vinculado y conectado.");
   }
 
-  // Si el socket está cerrado o no existe, reiniciar
-  if (!currentSock || connectionStatus === "close") {
+  // Si ya existía un intento previo no registrado con código o cuenta a medio vincular, limpiar para solicitar código limpio
+  if (
+    currentSock?.authState?.creds &&
+    !currentSock.authState.creds.registered &&
+    (currentSock.authState.creds.account || currentSock.authState.creds.pairingCode)
+  ) {
+    console.log("Limpiando intento previo para solicitar nuevo código limpio...");
+    await logoutWhatsApp();
+  } else if (!currentSock || connectionStatus === "close") {
     console.log("Socket desconectado, reiniciando antes de pedir pairing code...");
     await startWhatsApp();
   }
