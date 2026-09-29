@@ -60,12 +60,10 @@ async function usePostgresAuthState(): Promise<{
   const storedCreds = await readData("creds");
   let creds = storedCreds;
 
-  // Si tiene datos de cuenta previa pero nunca completó registro (intento fallido o interrumpido),
-  // esa sesión quedó corrupta e irrecuperable según el protocolo de WhatsApp. Limpiar para iniciar fresco.
-  if (creds && !creds.registered && creds.account) {
-    console.log("[WhatsApp Auth] Sesión previa con registro incompleto detectada. Limpiando para iniciar sesión fresca...");
-    await removeData("creds");
-    creds = null;
+  // Si no está registrado y tenía un intento previo fallido, limpiar credenciales intermedias
+  if (creds && !creds.registered && creds.me) {
+    delete creds.me;
+    delete creds.pairingCode;
   }
   if (!creds) {
     creds = initAuthCreds();
@@ -145,15 +143,8 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
     throw new Error("WhatsApp ya se encuentra vinculado y conectado.");
   }
 
-  // Si ya existía un intento previo no registrado con código o cuenta a medio vincular, limpiar para solicitar código limpio
-  if (
-    currentSock?.authState?.creds &&
-    !currentSock.authState.creds.registered &&
-    (currentSock.authState.creds.account || currentSock.authState.creds.pairingCode)
-  ) {
-    console.log("Limpiando intento previo para solicitar nuevo código limpio...");
-    await logoutWhatsApp();
-  } else if (!currentSock || connectionStatus === "close") {
+  // Si el socket está cerrado o no existe, reiniciar
+  if (!currentSock || connectionStatus === "close") {
     console.log("Socket desconectado, reiniciando antes de pedir pairing code...");
     await startWhatsApp();
   }
@@ -201,9 +192,13 @@ export async function logoutWhatsApp() {
   }
   if (currentSock) {
     try {
-      currentSock.logout().catch(() => {});
+      currentSock.ev.removeAllListeners("connection.update");
+      currentSock.ev.removeAllListeners("creds.update");
+      currentSock.ev.removeAllListeners("messages.upsert");
+      currentSock.end(undefined);
     } catch {}
   }
+  currentSock = null;
   await pool.query("DELETE FROM whatsapp_auth");
   latestQR = null;
   connectionStatus = "close";
@@ -248,13 +243,11 @@ export async function startWhatsApp() {
     if (connection === "close") {
       connectionStatus = "close";
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const isLoggedOut =
-        statusCode === DisconnectReason.loggedOut ||
-        statusCode === DisconnectReason.badSession;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
       console.log(
         `Conexión de WhatsApp cerrada (status: ${statusCode}).`,
-        isLoggedOut ? "Sesión desvinculada/inválida." : "Reintentando reconexión en 3 segundos..."
+        isLoggedOut ? "Sesión desvinculada." : "Reintentando reconexión en 3 segundos..."
       );
 
       latestQR = null;
